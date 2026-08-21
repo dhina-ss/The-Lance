@@ -29,7 +29,7 @@ const stagger = {
     visible: { transition: { staggerChildren: 0.1 } },
 };
 
-const site = 'https://thelance.dev';
+const site = 'https://thelance.in';
 const pageTitle = 'Endpoint Management System — The Lance';
 const pageDescription =
     'Complete endpoint visibility and control. Device inventory, live monitoring, USB & website blocking, application management, and more. $500 per user/year.';

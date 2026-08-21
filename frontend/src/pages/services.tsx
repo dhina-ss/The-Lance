@@ -16,7 +16,7 @@ const stagger = {
     visible: { transition: { staggerChildren: 0.1 } },
 };
 
-const site = 'https://thelance.dev';
+const site = 'https://thelance.in';
 const pageTitle = 'Services — The Lance';
 const pageDescription =
     'Web development, mobile apps, cloud & DevOps, and custom software. The Lance delivers senior-engineered solutions built to scale.';

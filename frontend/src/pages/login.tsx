@@ -14,7 +14,7 @@ const stagger = {
     visible: { transition: { staggerChildren: 0.1 } },
 };
 
-const site = 'https://thelance.dev';
+const site = 'https://thelance.in';
 const pageTitle = 'Login — The Lance';
 const pageDescription =
     'Log in to your account at The Lance to access client portals, project dashboards, and engineering resources.';

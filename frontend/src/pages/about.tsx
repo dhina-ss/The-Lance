@@ -16,7 +16,7 @@ const stagger = {
     visible: { transition: { staggerChildren: 0.1 } },
 };
 
-const site = 'https://thelance.dev';
+const site = 'https://thelance.in';
 const pageTitle = 'About — The Lance';
 const pageDescription =
     'Meet the team behind The Lance. Senior engineers building precise, scalable software since 2018. Our story, values, and mission.';

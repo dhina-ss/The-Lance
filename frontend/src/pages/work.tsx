@@ -14,7 +14,7 @@ const stagger = {
     visible: { transition: { staggerChildren: 0.1 } }
 };
 
-const site = 'https://thelance.dev';
+const site = 'https://thelance.in';
 const pageTitle = 'Work — The Lance';
 const pageDescription =
     'Case studies and projects from The Lance — fintech platforms, mobile apps, DevOps infrastructure, and more. Real outcomes for real clients.';

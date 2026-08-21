@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /tenant-dashboard
+Disallow: /login
+
+Sitemap: https://thelance.in/sitemap.xml

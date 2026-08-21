@@ -15,7 +15,7 @@ const stagger = {
     visible: { transition: { staggerChildren: 0.08 } },
 };
 
-const site = 'https://thelance.dev';
+const site = 'https://thelance.in';
 const pageTitle = 'Pricing — Endpoint Management System | The Lance';
 const pageDescription =
     'Endpoint Management System pricing. $500/user/year or $50/user/month. Volume discount to $450/user/year for teams over 10 users. All features included.';
