@@ -1,8 +1,16 @@
 import os
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
-app = Flask(__name__)
+# Determine static folder path for frontend/dist
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+FRONTEND_DIST = os.path.abspath(os.path.join(BASE_DIR, '..', 'frontend', 'dist'))
+
+if os.path.exists(FRONTEND_DIST):
+    app = Flask(__name__, static_folder=FRONTEND_DIST, static_url_path='')
+else:
+    app = Flask(__name__)
+
 CORS(app)
 
 # In-memory platform data
@@ -104,6 +112,22 @@ def add_product():
     PRODUCTS_DATA.insert(0, new_product)
     return jsonify(new_product), 201
 
+# Serve React Frontend SPA / Fallback Route
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_frontend(path):
+    if path != "" and app.static_folder and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    if app.static_folder and os.path.exists(os.path.join(app.static_folder, 'index.html')):
+        return send_from_directory(app.static_folder, 'index.html')
+    return jsonify({
+        "status": "online",
+        "message": "The Lance API Server is running smoothly",
+        "health": "/api/health",
+        "products": "/api/products"
+    }), 200
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
+
