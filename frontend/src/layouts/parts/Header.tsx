@@ -67,12 +67,13 @@ export default function Header() {
                             Start a Project
                         </Link>
                         {!isLoggedIn && (
-                            <Link
-                                to="/login"
-                                className="px-5 py-2.5 border border-primary text-primary text-sm font-semibold tracking-wide rounded transition-all duration-200 hover:bg-primary hover:text-primary-foreground"
+                            <button
+                                disabled
+                                aria-disabled="true"
+                                className="px-5 py-2.5 border border-primary/40 text-primary/50 text-sm font-semibold tracking-wide rounded opacity-50 cursor-not-allowed select-none"
                             >
                                 Login
-                            </Link>
+                            </button>
                         )}
                     </nav>
 
@@ -108,12 +109,13 @@ export default function Header() {
                             Start a Project
                         </Link>
                         {!isLoggedIn && (
-                            <Link
-                                to="/login"
-                                className="px-5 py-2.5 border border-primary text-primary text-sm font-semibold tracking-wide rounded text-center hover:bg-primary hover:text-primary-foreground transition-colors duration-200"
+                            <button
+                                disabled
+                                aria-disabled="true"
+                                className="px-5 py-2.5 border border-primary/40 text-primary/50 text-sm font-semibold tracking-wide rounded text-center opacity-50 cursor-not-allowed select-none"
                             >
                                 Login
-                            </Link>
+                            </button>
                         )}
                     </nav>
                 </div>
