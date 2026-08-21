@@ -4,9 +4,10 @@ set -o errexit
 
 echo "===> Building React Frontend..."
 cd frontend
-npm install
+npm install --legacy-peer-deps
 npm run build
 cd ..
 
 echo "===> Installing Python Dependencies..."
 pip install -r requirements.txt
+
