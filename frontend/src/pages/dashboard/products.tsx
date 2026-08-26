@@ -1,29 +1,24 @@
 import { Helmet } from '@dr.pogodin/react-helmet';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
-    ArrowLeft,
+    ChevronLeft,
     ChevronRight,
+    ChevronDown,
     Layers,
     Plus,
     X,
     Check,
     FolderPlus,
-    Server,
-    TicketCheck,
-    Globe,
-    Zap,
-    Shield,
-    Clock,
-    Users,
-    Activity,
     Building2,
-    Cpu,
-    Cloud,
+    Zap,
+    CheckCircle2,
+    Search,
 } from 'lucide-react';
 import { resolveIcon, PRODUCTS, ProductConfig } from '../../lib/products';
 import DashboardSidebar from '../../components/DashboardSidebar';
+import { credentialHeaders } from '../../api/client';
 
 const fadeUp = {
     hidden: { opacity: 0, y: 20 },
@@ -35,16 +30,148 @@ const stagger = {
     visible: { transition: { staggerChildren: 0.08 } },
 };
 
+/* ── Custom Select Option Interface & Dropdown Component ── */
+interface CustomSelectOption {
+    value: string;
+    label: string;
+}
+
+function CustomSelect({
+    value,
+    onChange,
+    options,
+    placeholder = 'Select option',
+    fullWidth = false,
+    openUp = false,
+}: {
+    value: string;
+    onChange: (val: string) => void;
+    options: CustomSelectOption[];
+    placeholder?: string;
+    fullWidth?: boolean;
+    openUp?: boolean;
+}) {
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                if (isOpen) setIsOpen(false);
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isOpen]);
+
+    const selectedOption = options.find((opt) => opt.value === value);
+
+    const toggleOpen = () => {
+        setIsOpen((prev) => !prev);
+    };
+
+    return (
+        <div className={`relative inline-block text-left ${fullWidth ? 'w-full' : ''}`} ref={dropdownRef}>
+            <button
+                type="button"
+                onClick={toggleOpen}
+                className={`px-3.5 py-2.5 bg-background border border-input rounded-xl text-xs font-semibold text-primary focus:outline-none focus:border-accent hover:border-accent/60 transition-all flex items-center justify-between gap-2 shadow-sm ${
+                    fullWidth ? 'w-full' : 'min-w-[140px]'
+                }`}
+            >
+                <span className="truncate">{selectedOption ? selectedOption.label : placeholder}</span>
+                <ChevronDown size={14} className={`text-muted-foreground transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180 text-accent' : ''}`} />
+            </button>
+
+            {isOpen && (
+                <div className={`absolute rounded-xl bg-background border border-border/80 shadow-2xl z-[100] p-1.5 animate-in fade-in zoom-in-95 duration-150 overflow-hidden ${
+                    openUp ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+                } ${
+                    fullWidth ? 'w-full left-0' : 'w-44 left-0'
+                }`}>
+                    <div className="space-y-0.5 max-h-60 overflow-y-auto py-0.5">
+                        {options.map((opt) => {
+                            const isSelected = opt.value === value;
+                            return (
+                                <button
+                                    key={opt.value}
+                                    type="button"
+                                    onClick={() => {
+                                        onChange(opt.value);
+                                        setIsOpen(false);
+                                    }}
+                                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                                        isSelected
+                                            ? 'bg-accent/15 text-accent font-bold'
+                                            : 'text-primary hover:bg-slate-100 hover:text-accent'
+                                    }`}
+                                >
+                                    <span>{opt.label}</span>
+                                    {isSelected && <Check size={13} className="text-accent shrink-0" />}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function ProductConsolePage() {
     const navigate = useNavigate();
 
+    useEffect(() => {
+        try {
+            const u = localStorage.getItem('user_profile') || localStorage.getItem('auth_token');
+            if (!u) {
+                navigate('/login', { replace: true });
+            }
+        } catch {
+            navigate('/login', { replace: true });
+        }
+    }, [navigate]);
+
     const [productsList, setProductsList] = useState<ProductConfig[]>(PRODUCTS);
+    const [tenants, setTenants] = useState<any[]>([]);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [statusFilter, setStatusFilter] = useState<string>('All');
     const [isModalOpen, setIsModalOpen] = useState(false);
 
     // Form state - Project Name, Tagline, Description
     const [formName, setFormName] = useState('');
     const [formTagline, setFormTagline] = useState('');
     const [formDescription, setFormDescription] = useState('');
+
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 10;
+
+    // Reset pagination to page 1 on filter changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchQuery, statusFilter]);
+
+    useEffect(() => {
+        fetch('/api/tenants', { headers: credentialHeaders })
+            .then((res) => (res.ok ? res.json() : []))
+            .then((data) => {
+                if (Array.isArray(data)) setTenants(data);
+            })
+            .catch(() => {});
+    }, []);
+
+    function getTenantCount(prodId: string): number {
+        if (!tenants || tenants.length === 0) {
+            return prodId === 'ems' ? 4 : 1;
+        }
+        const count = tenants.filter(
+            (t: any) =>
+                (t.productName || 'ems').toLowerCase() === prodId.toLowerCase() ||
+                (prodId === 'ems' && (!t.productName || t.productName.toLowerCase().includes('ems')))
+        ).length;
+        return count || 1;
+    }
 
     function handleAddProject(e: React.FormEvent) {
         e.preventDefault();
@@ -71,7 +198,7 @@ export default function ProductConsolePage() {
                 { label: 'Uptime', value: '99.99%', iconName: 'Zap' },
                 { label: 'Policies', value: '12', iconName: 'Shield' },
             ],
-            href: `/dashboard/tenants/${id}`,
+            href: `#`,
         };
 
         setProductsList((prev) => [newProduct, ...prev]);
@@ -82,6 +209,24 @@ export default function ProductConsolePage() {
         setFormTagline('');
         setFormDescription('');
     }
+
+    // Filter products
+    const filteredProducts = productsList.filter((prod) => {
+        const matchesSearch =
+            prod.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            prod.tagline.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            prod.badge.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesStatus = statusFilter === 'All' || statusFilter === 'Active';
+        return matchesSearch && matchesStatus;
+    });
+
+    // Pagination Slicing
+    const totalPages = Math.max(1, Math.ceil(filteredProducts.length / itemsPerPage));
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    const paginatedProducts = filteredProducts.slice(startIndex, endIndex);
+
+    const totalTenantsCount = tenants.length > 0 ? tenants.length : 5;
 
     return (
         <>
@@ -108,27 +253,14 @@ export default function ProductConsolePage() {
 
                             {/* Header Section */}
                             <motion.div variants={fadeUp} className="space-y-4">
-                                <button
-                                    onClick={() => navigate('/dashboard')}
-                                    className="flex items-center gap-2 text-xs font-semibold text-muted-foreground hover:text-primary transition-colors group"
-                                >
-                                    <ArrowLeft size={14} className="group-hover:-translate-x-0.5 transition-transform" />
-                                    <span>Back to Dashboard</span>
-                                </button>
 
                                 <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-border">
                                     <div>
-                                        <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium mb-2">
-                                            <Layers size={14} className="text-accent" />
-                                            <span>Console</span>
-                                            <ChevronRight size={12} className="text-border" />
-                                            <span className="text-primary font-semibold">Products Overview</span>
-                                        </div>
 
                                         <h1 className="text-3xl md:text-4xl font-bold text-primary tracking-tight">
                                             Products Console
                                         </h1>
-                                        <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+                                        <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
                                             Explore, manage, and monitor licensed product platforms and provisioned tenants across your organization.
                                         </p>
                                     </div>
@@ -136,7 +268,7 @@ export default function ProductConsolePage() {
                                     <div className="flex items-center gap-3 shrink-0">
                                         <button
                                             onClick={() => setIsModalOpen(true)}
-                                            className="px-5 py-2.5 bg-primary text-primary-foreground text-xs font-bold rounded-xl shadow-md hover:bg-accent hover:text-accent-foreground transition-all duration-200 flex items-center gap-2"
+                                            className="px-5 py-2.5 bg-primary text-primary-foreground text-xs font-bold rounded-xl shadow-md hover:bg-accent hover:text-accent-foreground transition-all duration-200 flex items-center gap-2 cursor-pointer"
                                         >
                                             <Plus size={16} />
                                             <span>Add New Project</span>
@@ -145,64 +277,198 @@ export default function ProductConsolePage() {
                                 </div>
                             </motion.div>
 
-                            {/* Product List Cards */}
-                            <motion.div variants={fadeUp} className="space-y-6">
-                                <div className="flex items-center justify-between pb-2 border-b border-border/60">
-                                    <h2 className="text-base font-extrabold text-primary flex items-center gap-2">
-                                        <Layers size={18} className="text-accent" />
-                                        Licensed Platforms & Products
-                                    </h2>
-                                    <span className="text-xs font-semibold text-muted-foreground">
-                                        {productsList.length} Active Platforms
-                                    </span>
+                            {/* Summary Analysis Cards */}
+                            <motion.div variants={fadeUp} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+                                <div className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl p-5 shadow-sm space-y-2">
+                                    <div className="flex items-center justify-between text-muted-foreground">
+                                        <span className="text-xs font-bold uppercase tracking-wider">Total Products</span>
+                                        <div className="p-2 rounded-xl bg-accent/10 text-accent">
+                                            <Layers size={18} />
+                                        </div>
+                                    </div>
+                                    <p className="text-2xl font-extrabold text-primary">
+                                        {productsList.length}
+                                    </p>
+                                    <p className="text-[11px] text-muted-foreground">Licensed platform systems</p>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {productsList.map((prod) => {
-                                        const prodIcon = resolveIcon(prod.iconName, 26);
+                                <div className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl p-5 shadow-sm space-y-2">
+                                    <div className="flex items-center justify-between text-muted-foreground">
+                                        <span className="text-xs font-bold uppercase tracking-wider">Provisioned Tenants</span>
+                                        <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                                            <Building2 size={18} />
+                                        </div>
+                                    </div>
+                                    <p className="text-2xl font-extrabold text-primary">
+                                        {totalTenantsCount}
+                                    </p>
+                                    <p className="text-[11px] text-muted-foreground">Active Organization Accounts</p>
+                                </div>
 
-                                        return (
-                                            <div
-                                                key={prod.id}
-                                                onClick={() => navigate(`/dashboard/tenants/${prod.id}`)}
-                                                className="group bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl p-6 shadow-sm hover:border-primary/40 hover:shadow-md hover:shadow-primary/5 transition-all flex flex-col justify-between space-y-6 cursor-pointer"
-                                            >
-                                                <div className="space-y-4">
-                                                    <div className="flex items-start justify-between gap-4">
-                                                        <div className="flex items-center gap-3.5">
-                                                            <div className={`w-14 h-14 rounded-2xl ${prod.bgColor} ${prod.accentColor} border ${prod.borderColor} flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform`}>
-                                                                {prodIcon}
-                                                            </div>
-                                                            <div>
-                                                                <div className="flex items-center gap-2">
-                                                                    <h3 className="text-base font-bold text-primary group-hover:text-accent transition-colors">
-                                                                        {prod.name}
-                                                                    </h3>
-                                                                    <span className="px-2.5 py-0.5 text-[10px] font-extrabold uppercase rounded-full bg-accent/10 text-accent border border-accent/20">
-                                                                        {prod.badge}
-                                                                    </span>
+                                <div className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl p-5 shadow-sm space-y-2">
+                                    <div className="flex items-center justify-between text-muted-foreground">
+                                        <span className="text-xs font-bold uppercase tracking-wider">Platform Status</span>
+                                        <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600">
+                                            <Zap size={18} />
+                                        </div>
+                                    </div>
+                                    <p className="text-2xl font-extrabold text-emerald-600 flex items-center gap-2">
+                                        100% <span className="text-xs font-bold text-muted-foreground uppercase">Operational</span>
+                                    </p>
+                                    <p className="text-[11px] text-muted-foreground">All services running smoothly</p>
+                                </div>
+                            </motion.div>
+
+                            {/* Search & Status Filter Toolbar */}
+                            <motion.div variants={fadeUp} className="bg-background/90 backdrop-blur-xl border border-border/80 p-4 rounded-2xl shadow-sm">
+                                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 w-full sm:w-auto">
+                                    {/* Search Bar */}
+                                    <div className="relative w-full sm:w-80">
+                                        <input
+                                            type="text"
+                                            placeholder="Search product name, badge, tagline..."
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            className="w-full px-4 py-2.5 pl-10 bg-background border border-input rounded-xl text-xs font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors"
+                                        />
+                                        <Search size={16} className="absolute left-3.5 top-3 text-muted-foreground" />
+                                    </div>
+
+                                    {/* Status Filter Dropdown */}
+                                    <div className="w-full sm:w-auto">
+                                        <CustomSelect
+                                            value={statusFilter}
+                                            onChange={setStatusFilter}
+                                            options={[
+                                                { value: 'All', label: 'All Statuses' },
+                                                { value: 'Active', label: 'Active' },
+                                                { value: 'Inactive', label: 'Inactive' },
+                                                { value: 'Pending', label: 'Pending' },
+                                            ]}
+                                        />
+                                    </div>
+                                </div>
+                            </motion.div>
+
+                            {/* PRODUCTS TABLE SECTION */}
+                            <motion.div variants={fadeUp} className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl shadow-sm overflow-hidden flex flex-col justify-between">
+                                <div className="overflow-x-auto min-h-[380px]">
+                                    <table className="w-full text-left border-collapse text-xs">
+                                        <thead>
+                                            <tr className="border-b border-border bg-muted-foreground/5 text-foreground/70 font-semibold uppercase tracking-wider text-[11px]">
+                                                <th className="py-4 px-6">Product Name</th>
+                                                <th className="py-4 px-6 text-center">Tenant Count</th>
+                                                <th className="py-4 px-6 text-center">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-border/60">
+                                            {filteredProducts.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={3} className="py-12 text-center text-muted-foreground font-medium">
+                                                        No products found matching criteria.
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                paginatedProducts.map((prod) => {
+                                                    const prodIcon = resolveIcon(prod.iconName, 22);
+                                                    const count = getTenantCount(prod.id);
+
+                                                    return (
+                                                        <tr key={prod.id} className="hover:bg-slate-100/80 transition-colors">
+                                                            {/* Product Name */}
+                                                            <td className="py-4 px-6">
+                                                                <div className="flex items-center gap-3.5">
+                                                                    <div className={`w-11 h-11 rounded-xl ${prod.bgColor} ${prod.accentColor} border ${prod.borderColor} flex items-center justify-center shrink-0 shadow-sm`}>
+                                                                        {prodIcon}
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="font-bold text-primary text-sm">{prod.name}</span>
+                                                                            <span className="px-2.5 py-0.5 text-[10px] font-extrabold uppercase rounded-full bg-accent/10 text-accent border border-accent/20">
+                                                                                {prod.badge}
+                                                                            </span>
+                                                                        </div>
+                                                                        <div className="text-[11px] text-muted-foreground font-medium mt-0.5">
+                                                                            {prod.tagline}
+                                                                        </div>
+                                                                    </div>
                                                                 </div>
-                                                                <p className="text-xs text-muted-foreground mt-0.5">{prod.tagline}</p>
-                                                            </div>
-                                                        </div>
-                                                        <ChevronRight size={16} className="text-muted-foreground group-hover:text-accent group-hover:translate-x-0.5 transition-all shrink-0 mt-1" />
-                                                    </div>
+                                                            </td>
 
-                                                    <p className="text-xs text-muted-foreground leading-relaxed">
-                                                        {prod.description}
-                                                    </p>
-                                                </div>
+                                                            {/* Tenant Count */}
+                                                            <td className="py-4 px-6 text-center">
+                                                                <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-xl bg-primary/5 text-primary border border-primary/10 font-bold text-xs">
+                                                                    <Building2 size={13} className="text-accent" />
+                                                                    <span>{count} {count === 1 ? 'Tenant' : 'Tenants'}</span>
+                                                                </div>
+                                                            </td>
 
-                                                {/* Card Footer Action */}
-                                                <div className="pt-4 border-t border-border/50 flex items-center justify-between">
-                                                    <span className="text-xs text-muted-foreground font-medium">Click to view tenant list table</span>
-                                                    <span className="text-xs font-bold text-accent group-hover:underline underline-offset-2 transition-colors">
-                                                        Manage Tenants Table →
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
+                                                            {/* Status */}
+                                                            <td className="py-4 px-6 text-center">
+                                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/30">
+                                                                    <CheckCircle2 size={12} />
+                                                                    <span>Active</span>
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                {/* Footer Pagination Bar */}
+                                <div className="p-4 bg-slate-50/80 border-t border-border/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs select-none">
+                                    <div className="text-muted-foreground font-medium">
+                                        Showing{' '}
+                                        <span className="font-bold text-primary">
+                                            {filteredProducts.length === 0 ? 0 : startIndex + 1}
+                                        </span>{' '}
+                                        to{' '}
+                                        <span className="font-bold text-primary">
+                                            {Math.min(endIndex, filteredProducts.length)}
+                                        </span>{' '}
+                                        of <span className="font-bold text-primary">{filteredProducts.length}</span> entries
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                        <button
+                                            type="button"
+                                            disabled={currentPage === 1}
+                                            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                                            className="h-8 w-8 flex justify-center items-center rounded-xl border border-input bg-background font-semibold text-primary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-all flex items-center gap-1 cursor-pointer"
+                                        >
+                                            <ChevronLeft size={14} />
+                                        </button>
+
+                                        <div className="flex items-center gap-1">
+                                            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+                                                <button
+                                                    key={pageNum}
+                                                    type="button"
+                                                    onClick={() => setCurrentPage(pageNum)}
+                                                    className={`h-8 w-8 rounded-xl font-bold transition-all cursor-pointer ${
+                                                        currentPage === pageNum
+                                                            ? 'bg-primary text-primary-foreground shadow-sm'
+                                                            : 'bg-background border border-input text-primary hover:bg-slate-100'
+                                                    }`}
+                                                >
+                                                    {pageNum}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            disabled={currentPage === totalPages || filteredProducts.length === 0}
+                                            onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                                            className="h-8 w-8 flex justify-center items-center rounded-xl border border-input bg-background font-semibold text-primary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-all flex items-center gap-1 cursor-pointer"
+                                        >
+                                            <ChevronRight size={14} />
+                                        </button>
+                                    </div>
                                 </div>
                             </motion.div>
 
@@ -229,7 +495,7 @@ export default function ProductConsolePage() {
                                     </div>
                                     <button
                                         onClick={() => setIsModalOpen(false)}
-                                        className="p-1.5 rounded-full bg-slate-100 text-muted-foreground hover:text-primary transition-colors"
+                                        className="p-1.5 rounded-full bg-slate-100 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
                                     >
                                         <X size={18} />
                                     </button>
@@ -285,13 +551,13 @@ export default function ProductConsolePage() {
                                         <button
                                             type="button"
                                             onClick={() => setIsModalOpen(false)}
-                                            className="px-4 py-2.5 border border-input text-xs font-semibold rounded-xl text-primary hover:bg-slate-100 transition-colors"
+                                            className="px-4 py-2.5 border border-input text-xs font-semibold rounded-xl text-primary hover:bg-slate-100 transition-colors cursor-pointer"
                                         >
                                             Cancel
                                         </button>
                                         <button
                                             type="submit"
-                                            className="px-5 py-2.5 bg-primary text-primary-foreground text-xs font-bold rounded-xl hover:bg-accent hover:text-accent-foreground transition-all flex items-center gap-1.5 shadow-md"
+                                            className="px-5 py-2.5 bg-primary text-primary-foreground text-xs font-bold rounded-xl hover:bg-accent hover:text-accent-foreground transition-all flex items-center gap-1.5 shadow-md cursor-pointer"
                                         >
                                             <Check size={14} />
                                             <span>Create Project Platform</span>
@@ -306,4 +572,3 @@ export default function ProductConsolePage() {
         </>
     );
 }
-

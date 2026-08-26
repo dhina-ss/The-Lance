@@ -7,9 +7,9 @@ export const contentData = {
       cta_secondary: "Our Services"
     },
     stats: [
-      { id: "stat-1", value: "50+", label: "Projects Delivered" },
-      { id: "stat-2", value: "8", label: "Years of Experience" },
-      { id: "stat-3", value: "30+", label: "Happy Clients" },
+      { id: "stat-1", value: "4+", label: "Projects Delivered" },
+      { id: "stat-2", value: "5+", label: "Years of Experience" },
+      { id: "stat-3", value: "3+", label: "Happy Clients" },
       { id: "stat-4", value: "99%", label: "Client Satisfaction" }
     ],
     services: {
@@ -135,7 +135,7 @@ export const contentData = {
     story: {
       heading: "Engineered for Longevity",
       paragraphs: [
-        { id: "sp1", text: "The Lance was founded in 2018 by a team of senior engineers who were tired of watching good ideas fail because of poor technical execution. We'd seen it from both sides — as engineers inside large companies and as consultants brought in to fix what others had broken."
+        { id: "sp1", text: "The Lance was founded in 2026 by a team of senior engineers who were tired of watching good ideas fail because of poor technical execution. We'd seen it from both sides — as engineers inside large companies and as consultants brought in to fix what others had broken."
         },
         { id: "sp2", text: "We started small, taking on a handful of projects where we could go deep rather than wide. That focus on quality over volume became our identity. Today, we work with a select group of clients at any given time — because we believe the best work comes from genuine partnership, not a production line." }
       ]
@@ -154,8 +154,8 @@ export const contentData = {
       heading: "The people behind the work",
       subheading: "A small, senior team with deep expertise across the full stack.",
       members: [
-        { id: "m1", name: "Dhinakaran Sekar", role: "Senior Full-Stack Developer", bio: "5+ years building distributed systems at scale. Previously at Stripe and Cloudflare. Obsessed with clean architecture and fast feedback loops." },
-        { id: "m2", name: "Rupali Verma", role: "Product & Growth", bio: "5+ years of experience in Product Management and Growth Hacking. Previously at Flipkart. Obsessed with building products that users love." }
+        { id: "m1", name: "Dhinakaran Sekar", role: "Senior Full-Stack Developer", bio: "5+ years building distributed systems at scale. Obsessed with clean architecture and fast feedback loops." },
+        { id: "m2", name: "Jaykumar A", role: "Senior Manager - Engineering", bio: "7+ years of experience in Engineering Management. Obsessed with building scalable and reliable systems." }
       ]
     },
     cta: {
@@ -184,18 +184,6 @@ export const contentData = {
         ],
         tags: ["React", "Node.js", "TypeScript", "PostgreSQL", "AWS"]
       },
-      {
-        id: "project-2",
-        title: "Enterprise Endpoint Security System",
-        category: "Security & Systems",
-        tagline: "Cross-platform device management & monitoring suite",
-        description: "Engineered a centralized endpoint management platform for real-time device control, policy enforcement, and live activity tracking.",
-        outcomes: [
-          { id: "o3", metric: "99.99%", label: "System Reliability" },
-          { id: "o4", metric: "10,000+", label: "Endpoints Supported" }
-        ],
-        tags: ["TypeScript", "Electron", "React", "Go", "Docker"]
-      }
     ],
     cta: {
       heading: "Have an Ambitious Project?",

@@ -107,11 +107,28 @@ function initC2Tracking(): void {
     document.head.appendChild(script);
 }
 
+function getStoredConsent(): CookieConsent | null {
+    if (typeof window === 'undefined') return null;
+    try {
+        const local = localStorage.getItem(COOKIE_CONSENT_KEY);
+        if (local) return JSON.parse(local);
+    } catch { }
+
+    try {
+        const match = document.cookie.match(new RegExp('(?:^|; )' + COOKIE_CONSENT_KEY + '=([^;]*)'));
+        if (match && match[1]) {
+            return JSON.parse(decodeURIComponent(match[1]));
+        }
+    } catch { }
+
+    return null;
+}
+
 /**
  * Cookie banner component for C2 analytics consent
  *
  * Displays a consent banner for C2 analytics tracking. Manages user consent
- * preferences in localStorage and controls whether analytics scripts are loaded.
+ * preferences in localStorage and document.cookie and controls whether analytics scripts are loaded.
  */
 export default function CookieBanner() {
     const [showBanner, setShowBanner] = useState(false);
@@ -132,34 +149,44 @@ export default function CookieBanner() {
     useEffect(function checkConsent() {
         if (typeof window === 'undefined') return;
 
-        const consentData = localStorage.getItem(COOKIE_CONSENT_KEY);
+        const consent = getStoredConsent();
 
-        if (!consentData) {
+        if (!consent) {
             setShowBanner(true);
             setIsLoaded(true);
             return;
         }
 
-        try {
-            const consent: CookieConsent = JSON.parse(consentData);
-            const daysSinceConsent = (Date.now() - consent.timestamp) / (1000 * 60 * 60 * 24);
+        const daysSinceConsent = (Date.now() - consent.timestamp) / (1000 * 60 * 60 * 24);
 
-            if (daysSinceConsent > COOKIE_CONSENT_EXPIRES_DAYS) {
-                localStorage.removeItem(COOKIE_CONSENT_KEY);
-                setShowBanner(true);
-            } else if (consent.analytics) {
+        if (daysSinceConsent > COOKIE_CONSENT_EXPIRES_DAYS) {
+            try { localStorage.removeItem(COOKIE_CONSENT_KEY); } catch { }
+            try { document.cookie = `${COOKIE_CONSENT_KEY}=; max-age=0; path=/;`; } catch { }
+            setShowBanner(true);
+        } else {
+            // Once user has accepted or declined, NEVER ask again
+            setShowBanner(false);
+            if (consent.analytics) {
                 initC2Tracking();
             }
-        } catch {
-            localStorage.removeItem(COOKIE_CONSENT_KEY);
-            setShowBanner(true);
         }
 
         setIsLoaded(true);
     }, []);
 
     function saveConsent(analytics: boolean) {
-        localStorage.setItem(COOKIE_CONSENT_KEY, JSON.stringify({ analytics, timestamp: Date.now() }));
+        const data: CookieConsent = { analytics, timestamp: Date.now() };
+        const jsonStr = JSON.stringify(data);
+
+        try {
+            localStorage.setItem(COOKIE_CONSENT_KEY, jsonStr);
+        } catch { }
+
+        try {
+            const maxAge = COOKIE_CONSENT_EXPIRES_DAYS * 86400;
+            document.cookie = `${COOKIE_CONSENT_KEY}=${encodeURIComponent(jsonStr)}; max-age=${maxAge}; path=/; SameSite=Lax`;
+        } catch { }
+
         window.dispatchEvent(new CustomEvent('cookie-consent-changed', { detail: { consented: analytics } }));
         if (analytics) initC2Tracking();
         setShowBanner(false);
@@ -167,7 +194,8 @@ export default function CookieBanner() {
 
     function revokeConsent() {
         if (typeof window === 'undefined') return;
-        localStorage.removeItem(COOKIE_CONSENT_KEY);
+        try { localStorage.removeItem(COOKIE_CONSENT_KEY); } catch { }
+        try { document.cookie = `${COOKIE_CONSENT_KEY}=; max-age=0; path=/;`; } catch { }
         window.dispatchEvent(new CustomEvent('cookie-consent-changed', { detail: { consented: false } }));
         setShowBanner(true);
     }

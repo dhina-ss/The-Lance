@@ -99,6 +99,21 @@
   background: hsl(var(--accent) / 0.7);
 }
 
+.slim-scrollbar-x::-webkit-scrollbar {
+  height: 6px;
+}
+.slim-scrollbar-x::-webkit-scrollbar-track {
+  background: hsl(var(--muted) / 0.15);
+  border-radius: 9999px;
+}
+.slim-scrollbar-x::-webkit-scrollbar-thumb {
+  background: hsl(var(--accent) / 0.4);
+  border-radius: 9999px;
+}
+.slim-scrollbar-x::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--accent));
+}
+
 /* Firefox thin scrollbar support */
 * {
   scrollbar-width: thin;

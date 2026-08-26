@@ -79,7 +79,7 @@ export default function ActivityLog() {
             {activities.map((row) => {
               const Icon = row.icon;
               return (
-                <tr key={row.id} className="hover:bg-muted/40 transition-colors group">
+                <tr key={row.id} className="hover:bg-slate-100 transition-colors group">
                   <td className="py-3.5 px-4 font-bold text-primary">
                     <div className="flex items-center gap-2.5">
                       <div className={`w-7 h-7 rounded-lg ${row.iconBg} ${row.iconColor} flex items-center justify-center`}>

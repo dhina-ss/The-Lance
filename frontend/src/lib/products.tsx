@@ -46,7 +46,7 @@ export const PRODUCTS: ProductConfig[] = [
             { label: 'Uptime', value: '99.98%', iconName: 'Zap' },
             { label: 'Policies Active', value: '84', iconName: 'Shield' },
         ],
-        href: '/dashboard/products/ems',
+        href: '#',
     },
     {
         id: 'tickets',
@@ -71,7 +71,7 @@ export const PRODUCTS: ProductConfig[] = [
             { label: 'Avg. Resolution', value: '4.2h', iconName: 'Clock' },
             { label: 'Agents', value: '32', iconName: 'Users' },
         ],
-        href: '/dashboard/products/tickets',
+        href: '#',
     },
 ];
 

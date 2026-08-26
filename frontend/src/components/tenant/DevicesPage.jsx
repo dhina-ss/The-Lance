@@ -17,6 +17,7 @@ import {
 	uninstallApp,
 	uploadPackage,
 	queueInstall,
+	cancelDeviceCommand,
 	formatBytes,
 	formatHoursMinutes,
 	formatDuration,
@@ -42,12 +43,17 @@ import {
 	UploadCloud,
 	Trash2,
 	X,
+	Check,
 	ChevronDown,
+	ChevronLeft,
+	ChevronRight,
 	Globe,
 	MapPin,
 	Terminal,
 	Smartphone,
 	Laptop,
+	Loader2,
+	StopCircle,
 } from 'lucide-react';
 
 // USB-block durations offered when enabling. minutes 0 = permanent.
@@ -64,10 +70,10 @@ const USB_DURATIONS = [
 function statusClasses(status) {
 	if (status === 'Online') return { pill: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-bold', dot: 'bg-emerald-500' };
 	if (status === 'Sleep') return { pill: 'bg-amber-500/10 text-amber-600 border border-amber-500/20 font-bold', dot: 'bg-amber-500' };
-	return { pill: 'bg-muted/40 text-muted-foreground border border-border/60 font-bold', dot: 'bg-muted-foreground' };
+	return { pill: 'bg-slate-100 text-muted-foreground border border-border/60 font-bold', dot: 'bg-muted-foreground' };
 }
 
-export default function DevicesPage() {
+export default function DevicesPage({ initialDeviceId, onClearInitialDevice }) {
 	const [devices, setDevices] = useState([]);
 	const [loading, setLoading] = useState(true);
 	const [loadError, setLoadError] = useState(null);
@@ -77,18 +83,97 @@ export default function DevicesPage() {
 	const [statusFilter, setStatusFilter] = useState(['ALL']);
 	const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
 	const statusDropdownRef = useRef(null);
+
+	// Pagination state
+	const [currentPage, setCurrentPage] = useState(1);
+	const itemsPerPage = 10;
 	const [inspectDevice, setInspectDevice] = useState(null);
 	const [detailError, setDetailError] = useState(null);
 	const [actionMsg, setActionMsg] = useState(null);
+	// Ticks every 10s to live-update command elapsed timers and refresh status.
+	const [nowTick, setNowTick] = useState(Date.now());
 
 	// Device-detail live state
 	const [usbBlockingEnabled, setUsbBlockingEnabled] = useState(false);
 	const [usbBlockingUntil, setUsbBlockingUntil] = useState(null);
 	const [usbDuration, setUsbDuration] = useState(60); // minutes; 0 = permanent
+	const [isUsbDropdownOpen, setIsUsbDropdownOpen] = useState(false);
+	const usbDropdownRef = useRef(null);
+
 	const [loginEachStartup, setLoginEachStartup] = useState(false);
 	const [blockedDomains, setBlockedDomains] = useState([]); // [{id, domain}]
 	const [newDomainInput, setNewDomainInput] = useState('');
 	const pushFileRef = useRef(null);
+
+	// Uninstall confirmation card modal state
+	const [uninstallTargetApp, setUninstallTargetApp] = useState(null);
+	const [uninstalling, setUninstalling] = useState(false);
+
+	// Push software installation confirmation card modal state
+	const [pendingInstallerFile, setPendingInstallerFile] = useState(null);
+	const [silentSwitchInput, setSilentSwitchInput] = useState('/S');
+	const [isUploadingInstaller, setIsUploadingInstaller] = useState(false);
+
+	// Id of the command currently being cancelled (drives its spinner).
+	const [cancellingCommandId, setCancellingCommandId] = useState(null);
+
+	const handleOpenUninstallModal = (app) => {
+		setUninstallTargetApp(app);
+	};
+
+	const handleConfirmUninstall = async () => {
+		if (!uninstallTargetApp || !inspectDevice || uninstalling) return;
+		setUninstalling(true);
+		try {
+			await uninstallApp(inspectDevice.id, uninstallTargetApp.id);
+			notify(`Uninstall command for "${uninstallTargetApp.name}" queued for ${inspectDevice.name}.`);
+			const cmds = await fetchDeviceCommands(inspectDevice.id).catch(() => null);
+			if (cmds) setInspectDevice((cur) => (cur ? { ...cur, commands: cmds } : cur));
+			setUninstallTargetApp(null);
+		} catch (err) {
+			notify(err instanceof Error ? err.message : 'Failed to queue the uninstall.');
+		} finally {
+			setUninstalling(false);
+		}
+	};
+
+	const handleOpenPushInstallModal = (file) => {
+		setPendingInstallerFile(file);
+		setSilentSwitchInput(file.name.toLowerCase().endsWith('.exe') ? '/S' : '');
+	};
+
+	const handleConfirmPushInstall = async () => {
+		if (!pendingInstallerFile || !inspectDevice || isUploadingInstaller) return;
+		setIsUploadingInstaller(true);
+		try {
+			notify(`Uploading ${pendingInstallerFile.name}…`);
+			const pkg = await uploadPackage(pendingInstallerFile, pendingInstallerFile.name, silentSwitchInput);
+			await queueInstall(inspectDevice.id, pkg.id, 'install');
+			notify(`Install of "${pkg.displayName}" queued for ${inspectDevice.name}.`);
+			const cmds = await fetchDeviceCommands(inspectDevice.id).catch(() => null);
+			if (cmds) setInspectDevice((cur) => (cur ? { ...cur, commands: cmds } : cur));
+			setPendingInstallerFile(null);
+		} catch (err) {
+			notify(err instanceof Error ? err.message : 'Failed to push the installer.');
+		} finally {
+			setIsUploadingInstaller(false);
+		}
+	};
+
+	const handleCancelCommand = async (commandId) => {
+		if (!inspectDevice || cancellingCommandId) return;
+		setCancellingCommandId(commandId);
+		try {
+			await cancelDeviceCommand(commandId);
+			notify('Command cancelled.');
+			const cmds = await fetchDeviceCommands(inspectDevice.id).catch(() => null);
+			if (cmds) setInspectDevice((cur) => (cur ? { ...cur, commands: cmds } : cur));
+		} catch (err) {
+			notify(err instanceof Error ? err.message : 'Failed to cancel the command.');
+		} finally {
+			setCancellingCommandId(null);
+		}
+	};
 
 	const loadDevices = async () => {
 		try {
@@ -107,10 +192,38 @@ export default function DevicesPage() {
 		return () => clearInterval(timer);
 	}, []);
 
+	// While a device is open, tick every 10s: refresh its command queue so
+	// statuses update and the "time to uninstall" timers advance.
+	useEffect(() => {
+		if (!inspectDevice?.id) return undefined;
+		const id = inspectDevice.id;
+		const timer = setInterval(async () => {
+			setNowTick(Date.now());
+			const cmds = await fetchDeviceCommands(id).catch(() => null);
+			if (cmds) setInspectDevice((cur) => (cur && cur.id === id ? { ...cur, commands: cmds } : cur));
+		}, 10000);
+		return () => clearInterval(timer);
+	}, [inspectDevice?.id]);
+
+	useEffect(() => {
+		if (initialDeviceId && devices.length > 0) {
+			const target = devices.find(
+				(d) => String(d.id) === String(initialDeviceId) || String(d.deviceId) === String(initialDeviceId)
+			);
+			if (target) {
+				openDevice(target);
+				if (onClearInitialDevice) onClearInitialDevice();
+			}
+		}
+	}, [initialDeviceId, devices]);
+
 	useEffect(() => {
 		const handleClickOutside = (event) => {
 			if (statusDropdownRef.current && !statusDropdownRef.current.contains(event.target)) {
 				setIsStatusDropdownOpen(false);
+			}
+			if (usbDropdownRef.current && !usbDropdownRef.current.contains(event.target)) {
+				setIsUsbDropdownOpen(false);
 			}
 		};
 		document.addEventListener('mousedown', handleClickOutside);
@@ -250,37 +363,21 @@ export default function DevicesPage() {
 		}
 	};
 
-	const handleUninstall = async (app) => {
-		if (!inspectDevice) return;
-		if (!window.confirm(`Uninstall "${app.name}" from ${inspectDevice.name}?`)) return;
-		try {
-			await uninstallApp(inspectDevice.id, app.id);
-			notify(`Uninstall of "${app.name}" queued. It runs on the device's next command cycle.`);
-			const cmds = await fetchDeviceCommands(inspectDevice.id).catch(() => null);
-			if (cmds) setInspectDevice((cur) => (cur ? { ...cur, commands: cmds } : cur));
-		} catch (err) {
-			notify(err instanceof Error ? err.message : 'Failed to queue the uninstall.');
-		}
+	const handleUninstall = (app) => {
+		handleOpenUninstallModal(app);
 	};
 
-	const handlePushInstaller = async (e) => {
+	const handlePushInstaller = (e) => {
 		const file = e.target.files?.[0];
 		e.target.value = '';
 		if (!file || !inspectDevice) return;
-		try {
-			notify(`Uploading ${file.name}…`);
-			const silent = file.name.toLowerCase().endsWith('.exe')
-				? window.prompt('Silent switch for this EXE (e.g. /S). Leave blank for MSI-style.', '/S') || ''
-				: '';
-			const pkg = await uploadPackage(file, file.name, silent);
-			await queueInstall(inspectDevice.id, pkg.id, 'install');
-			notify(`Install of "${pkg.displayName}" queued for ${inspectDevice.name}.`);
-			const cmds = await fetchDeviceCommands(inspectDevice.id).catch(() => null);
-			if (cmds) setInspectDevice((cur) => (cur ? { ...cur, commands: cmds } : cur));
-		} catch (err) {
-			notify(err instanceof Error ? err.message : 'Failed to push the installer.');
-		}
+		handleOpenPushInstallModal(file);
 	};
+
+	// Reset pagination on filter change
+	useEffect(() => {
+		setCurrentPage(1);
+	}, [searchTerm, osTabFilter, statusFilter]);
 
 	// Filtering
 	const filteredDevices = devices.filter((dev) => {
@@ -297,6 +394,12 @@ export default function DevicesPage() {
 			statusFilter.some((s) => s.toLowerCase() === dev.status.toLowerCase());
 		return matchesSearch && matchesOs && matchesStatus;
 	});
+
+	// Pagination Slicing
+	const totalPages = Math.max(1, Math.ceil(filteredDevices.length / itemsPerPage));
+	const startIndex = (currentPage - 1) * itemsPerPage;
+	const endIndex = startIndex + itemsPerPage;
+	const paginatedDevices = filteredDevices.slice(startIndex, endIndex);
 
 	const totalCount = devices.length;
 	const onlineCount = devices.filter((d) => d.status === 'Online').length;
@@ -348,9 +451,6 @@ export default function DevicesPage() {
 							<h2 className="text-xl font-extrabold text-primary tracking-tight">Endpoint Device Inventory</h2>
 							<p className="text-xs text-muted-foreground mt-0.5">Manage, monitor, and enforce security policies across enterprise assets</p>
 						</div>
-						<button onClick={() => { setLoading(true); loadDevices(); }} className="px-3.5 py-2 bg-background border border-input text-primary hover:bg-muted rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer">
-							<RefreshCw size={14} /> Refresh
-						</button>
 					</div>
 
 					<div className="flex flex-col lg:flex-row items-center justify-between gap-4 pt-2">
@@ -360,8 +460,8 @@ export default function DevicesPage() {
 								<input type="text" placeholder="Search device, IP, user..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-background border border-input rounded-xl pl-9 pr-4 py-2 text-xs font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all" />
 							</div>
 
-							<div className="relative" ref={statusDropdownRef}>
-								<button type="button" onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)} className="bg-background text-primary text-xs font-semibold border border-input rounded-xl px-3.5 py-2 outline-none cursor-pointer flex items-center gap-2 hover:bg-muted transition-all">
+							<div className="relative flex gap-3" ref={statusDropdownRef}>
+								<button type="button" onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)} className="bg-background text-primary text-xs font-semibold border border-input rounded-xl px-3.5 py-2 outline-none cursor-pointer flex items-center gap-2 hover:bg-slate-100 transition-all">
 									<span>Status: {statusFilter.includes('ALL') ? 'All' : statusFilter.join(', ')}</span>
 									<ChevronDown size={14} className={`transition-transform ${isStatusDropdownOpen ? 'rotate-180' : ''}`} />
 								</button>
@@ -380,23 +480,27 @@ export default function DevicesPage() {
 													let cur = statusFilter.includes('ALL') ? [] : [...statusFilter];
 													cur = cur.includes(option.id) ? cur.filter((i) => i !== option.id) : [...cur, option.id];
 													setStatusFilter(cur.length === 0 || cur.length === 3 ? ['ALL'] : cur);
-												}} className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer select-none ${isSelected ? 'bg-primary/10 text-primary font-bold' : 'text-muted-foreground hover:bg-muted'}`}>
+												}} className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer select-none ${isSelected ? 'bg-primary/10 text-primary font-bold' : 'text-muted-foreground hover:bg-slate-100'}`}>
 													<div className="flex items-center gap-2.5"><span className={`w-2 h-2 rounded-full ${option.dot}`}></span><span>{option.label}</span></div>
 												</div>
 											);
 										})}
 									</div>
 								)}
+								<button onClick={() => { setLoading(true); loadDevices(); }} className="px-3.5 py-2 bg-background border border-input text-primary hover:bg-slate-100 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer">
+									<RefreshCw size={14} /> Refresh
+								</button>
 							</div>
 						</div>
 					</div>
 				</div>
 
 				{/* Devices Table */}
-				<div className="overflow-x-auto">
+				<div className="overflow-x-auto min-h-[450px]">
 					<table className="w-full text-left border-collapse">
-						<thead className="border-b border-border/60 text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground bg-muted/20">
+						<thead className="border-b border-border/60 text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground bg-slate-100/80">
 							<tr>
+								<th className="px-6 py-3.5 w-14 text-center">#</th>
 								<th className="px-6 py-3.5">Device Name</th>
 								<th className="px-6 py-3.5">User</th>
 								<th className="px-6 py-3.5">IP Address</th>
@@ -407,12 +511,15 @@ export default function DevicesPage() {
 						</thead>
 						<tbody className="divide-y divide-border/40 text-xs">
 							{loading ? (
-								<tr><td colSpan={6} className="py-12 text-center text-muted-foreground">Loading devices…</td></tr>
-							) : filteredDevices.length > 0 ? (
-								filteredDevices.map((dev) => {
+								<tr><td colSpan={7} className="py-12 text-center text-muted-foreground">Loading devices…</td></tr>
+							) : paginatedDevices.length > 0 ? (
+								paginatedDevices.map((dev, index) => {
 									const sc = statusClasses(dev.status);
 									return (
-										<tr key={dev.id} onClick={() => openDevice(dev)} className="hover:bg-muted/40 transition-colors group cursor-pointer">
+										<tr key={dev.id} onClick={() => openDevice(dev)} className="hover:bg-slate-100/80 transition-colors group cursor-pointer">
+											<td className="px-6 py-4 text-center font-bold text-muted-foreground/80 font-mono text-[11px]">
+												{startIndex + index + 1}
+											</td>
 											<td className="px-6 py-4">
 												<span className="font-bold text-primary block group-hover:text-accent transition-colors">{dev.name}</span>
 												<span className="text-[11px] text-muted-foreground font-medium">{dev.model}</span>
@@ -440,15 +547,62 @@ export default function DevicesPage() {
 									);
 								})
 							) : (
-								<tr><td colSpan={6} className="py-12 text-center text-muted-foreground text-xs">No endpoint devices match the filter criteria.</td></tr>
+								<tr><td colSpan={7} className="py-12 text-center text-muted-foreground text-xs">No endpoint devices match the filter criteria.</td></tr>
 							)}
 						</tbody>
 					</table>
 				</div>
 
-				<div className="p-4 border-t border-border/60 text-xs text-muted-foreground">
-					Showing <span className="font-bold text-primary">{filteredDevices.length}</span> of{' '}
-					<span className="font-bold text-primary">{totalCount}</span> enrolled devices
+				{/* Footer Pagination Bar (Super Admin Dashboard Style) */}
+				<div className="p-4 bg-slate-50/80 border-t border-border/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs select-none">
+					<div className="text-muted-foreground font-medium">
+						Showing{' '}
+						<span className="font-bold text-primary">
+							{filteredDevices.length === 0 ? 0 : startIndex + 1}
+						</span>{' '}
+						to{' '}
+						<span className="font-bold text-primary">
+							{Math.min(endIndex, filteredDevices.length)}
+						</span>{' '}
+						of <span className="font-bold text-primary">{filteredDevices.length}</span> entries
+					</div>
+
+					<div className="flex items-center gap-1.5 shrink-0">
+						<button
+							type="button"
+							disabled={currentPage === 1}
+							onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+							className="h-8 w-8 flex justify-center items-center rounded-xl border border-input bg-background font-semibold text-primary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-all cursor-pointer"
+						>
+							<ChevronLeft size={14} />
+						</button>
+
+						<div className="flex items-center gap-1">
+							{Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+								<button
+									key={pageNum}
+									type="button"
+									onClick={() => setCurrentPage(pageNum)}
+									className={`h-8 w-8 rounded-xl font-bold transition-all cursor-pointer ${
+										currentPage === pageNum
+											? 'bg-primary text-primary-foreground shadow-sm'
+											: 'bg-background border border-input text-primary hover:bg-slate-100'
+									}`}
+								>
+									{pageNum}
+								</button>
+							))}
+						</div>
+
+						<button
+							type="button"
+							disabled={currentPage === totalPages || filteredDevices.length === 0}
+							onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+							className="h-8 w-8 flex justify-center items-center rounded-xl border border-input bg-background font-semibold text-primary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-all cursor-pointer"
+						>
+							<ChevronRight size={14} />
+						</button>
+					</div>
 				</div>
 			</div>
 
@@ -484,14 +638,13 @@ export default function DevicesPage() {
 							{detailError && <div className="bg-error/10 text-error rounded-2xl px-4 py-3 text-[13px]">{detailError}</div>}
 
 							{/* Assigned User */}
-							<div className="bg-gradient-to-r from-primary/15 to-secondary/5 p-6 rounded-3xl border border-outline-variant/40 shadow-sm space-y-4">
+							<div className="bg-gradient-to-r from-accent/15 to-muted/5 p-6 rounded-3xl border border-outline-variant/40 shadow-sm space-y-4">
 								<div className="flex items-center gap-4 pb-4 border-b border-outline-variant/50">
-									<div className="w-14 h-14 rounded-2xl bg-primary text-on-primary font-bold text-xl flex items-center justify-center shadow-md">
+									<div className="w-14 h-14 rounded-2xl bg-accent text-on-primary font-bold text-xl flex items-center justify-center shadow-md">
 										{(inspectDevice.userName || inspectDevice.user || '?').slice(0, 2).toUpperCase()}
 									</div>
 									<div className="flex flex-col items-start gap-1">
-										<h4 className="text-[20px] font-bold text-on-surface">{inspectDevice.userName || 'Unassigned'}</h4>
-										<span className="px-3 py-0.5 bg-primary/10 text-primary font-semibold text-[12px] rounded-full">{inspectDevice.userRole}</span>
+										<h4 className="text-[24px] font-bold text-on-surface">{inspectDevice.userName || 'Unassigned'}</h4>
 									</div>
 								</div>
 								<div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-[13px] pt-1">
@@ -525,7 +678,7 @@ export default function DevicesPage() {
 
 								<div className="p-4 bg-white rounded-2xl border border-outline-variant/30 flex items-center justify-between">
 									<div className="flex items-center gap-3">
-										<div className={`w-10 h-10 rounded-xl flex items-center justify-center ${loginEachStartup ? 'bg-primary/10 text-primary' : 'bg-surface-container-high text-on-surface-variant'}`}>
+										<div className={`w-10 h-10 rounded-xl flex items-center justify-center ${loginEachStartup ? 'bg-accent/10 text-accent' : 'bg-surface-container-high text-on-surface-variant'}`}>
 											<span className="material-symbols-outlined">{loginEachStartup ? 'lock_clock' : 'how_to_reg'}</span>
 										</div>
 										<div>
@@ -537,7 +690,7 @@ export default function DevicesPage() {
 											</span>
 										</div>
 									</div>
-									<button type="button" onClick={handleToggleLoginPolicy} className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${loginEachStartup ? 'bg-primary' : 'bg-outline-variant'}`}>
+									<button type="button" onClick={handleToggleLoginPolicy} className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${loginEachStartup ? 'bg-accent' : 'bg-outline-variant'}`}>
 										<span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg transition ${loginEachStartup ? 'translate-x-5' : 'translate-x-0'}`} />
 									</button>
 								</div>
@@ -634,19 +787,42 @@ export default function DevicesPage() {
 											</button>
 										) : (
 											<div className="flex items-center gap-2">
-												<select
-													value={usbDuration}
-													onChange={(e) => setUsbDuration(Number(e.target.value))}
-													className="flex-1 bg-surface-container-high border border-outline-variant/40 rounded-xl px-3 py-2 text-[13px] outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
-												>
-													{USB_DURATIONS.map((o) => (
-														<option key={o.minutes} value={o.minutes}>{o.label}</option>
-													))}
-												</select>
+												<div className="relative flex-1" ref={usbDropdownRef}>
+													<button
+														type="button"
+														onClick={() => setIsUsbDropdownOpen(!isUsbDropdownOpen)}
+														className="w-full bg-slate-100/90 text-primary font-semibold text-[13px] border border-outline-variant/40 rounded-xl px-3.5 py-2 outline-none cursor-pointer flex items-center justify-between gap-2 hover:bg-slate-200/70 transition-all shadow-xs"
+													>
+														<span>{USB_DURATIONS.find((o) => o.minutes === usbDuration)?.label || '1 hour'}</span>
+														<ChevronDown size={14} className={`transition-transform duration-200 text-muted-foreground ${isUsbDropdownOpen ? 'rotate-180 text-accent' : ''}`} />
+													</button>
+													{isUsbDropdownOpen && (
+														<div className="absolute left-0 top-full mt-2 w-full min-w-[160px] bg-background border border-border/80 rounded-2xl p-1.5 shadow-2xl z-50 space-y-1">
+															{USB_DURATIONS.map((o) => {
+																const isSelected = usbDuration === o.minutes;
+																return (
+																	<div
+																		key={o.minutes}
+																		onClick={() => {
+																			setUsbDuration(o.minutes);
+																			setIsUsbDropdownOpen(false);
+																		}}
+																		className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer select-none transition-colors ${
+																			isSelected ? 'bg-primary/10 text-primary font-bold' : 'text-muted-foreground hover:bg-slate-100 hover:text-primary'
+																		}`}
+																	>
+																		<span>{o.label}</span>
+																		{isSelected && <Check size={14} className="text-primary" />}
+																	</div>
+																);
+															})}
+														</div>
+													)}
+												</div>
 												<button
 													type="button"
 													onClick={() => handleSetUsb(true, usbDuration === 0 ? null : usbDuration)}
-													className="px-3.5 py-2 bg-primary text-on-primary font-medium text-[13px] rounded-xl hover:bg-primary/90 cursor-pointer whitespace-nowrap"
+													className="px-3.5 py-2 bg-accent text-on-primary font-medium text-[13px] rounded-xl hover:bg-primary/90 cursor-pointer whitespace-nowrap"
 												>
 													Block USB
 												</button>
@@ -704,15 +880,12 @@ export default function DevicesPage() {
 								<div className="flex items-center justify-between">
 									<SectionTitle icon="security" text="Antivirus & Threat Protection" />
 									{(() => {
-										const rt = inspectDevice.defenderRealtime;
-										const av = inspectDevice.defenderAntivirus;
-										const known = rt != null || av != null;
-										const active = rt === true && av === true;
-										const badge = !known
+										const ws = windowsSecurity(inspectDevice);
+										const badge = !ws.reported
 											? { txt: 'UNKNOWN', cls: 'bg-outline-variant/50 text-on-surface-variant', icon: 'help' }
-											: active
-												? { txt: 'ACTIVATED', cls: 'bg-primary/10 text-primary', icon: 'verified_user' }
-												: { txt: 'NOT ACTIVATED', cls: 'bg-error/10 text-error', icon: 'gpp_bad' };
+											: ws.secured
+												? { txt: 'SECURED', cls: 'bg-primary/10 text-primary', icon: 'verified_user' }
+												: { txt: 'NOT SECURED', cls: 'bg-error/10 text-error', icon: 'gpp_bad' };
 										return (
 											<span className={`px-3 py-1 font-bold text-[11px] rounded-full flex items-center gap-1 ${badge.cls}`}>
 												<span className="material-symbols-outlined text-[13px]">{badge.icon}</span>{badge.txt}
@@ -723,14 +896,7 @@ export default function DevicesPage() {
 								{inspectDevice.securityStatusUpdatedAt ? (
 									<>
 										<div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-[13px]">
-											<Field
-												label="Defender"
-												value={
-													inspectDevice.defenderRealtime === true && inspectDevice.defenderAntivirus === true
-														? 'Activated'
-														: 'Not activated'
-												}
-											/>
+											<Field label="Windows Security" value={windowsSecurity(inspectDevice).secured ? 'Secured' : 'Not secured'} />
 											<Field label="Real-time Protection" value={boolLabel(inspectDevice.defenderRealtime)} />
 											<Field label="Antivirus" value={boolLabel(inspectDevice.defenderAntivirus)} />
 											<Field
@@ -801,7 +967,7 @@ export default function DevicesPage() {
 								</div>
 								<form onSubmit={handleAddBlockedDomain} className="flex items-center gap-2">
 									<input type="text" placeholder="Enter domain to block e.g. tiktok.com" value={newDomainInput} onChange={(e) => setNewDomainInput(e.target.value)} className="flex-1 bg-white border border-outline-variant/40 rounded-xl px-3 py-2 text-[13px] outline-none focus:ring-2 focus:ring-primary/20" />
-									<button type="submit" className="px-3.5 py-2 bg-primary text-on-primary font-medium text-[13px] rounded-xl hover:bg-primary/90 cursor-pointer whitespace-nowrap">Block Domain</button>
+									<button type="submit" className="px-3.5 py-2 bg-accent text-on-primary font-medium text-[13px] rounded-xl hover:bg-slate-400 cursor-pointer whitespace-nowrap">Block Domain</button>
 								</form>
 								<div className="flex flex-wrap gap-1.5">
 									{blockedDomains.length === 0 && <span className="text-[12px] text-on-surface-variant">No custom domains blocked.</span>}
@@ -826,7 +992,7 @@ export default function DevicesPage() {
 													<span className="font-semibold text-on-surface block truncate">{app.name}</span>
 													<span className="text-[11px] text-on-surface-variant">{[app.publisher, app.version].filter(Boolean).join(' · ') || '—'}</span>
 												</div>
-												<button onClick={() => handleUninstall(app)} title="Uninstall" className="ml-2 p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/10 cursor-pointer shrink-0">
+												<button onClick={() => handleUninstall(app)} title="Uninstall" className="ml-2 p-1.5 w-9 h-9 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/10 cursor-pointer shrink-0">
 													<span className="material-symbols-outlined text-lg">delete_sweep</span>
 												</button>
 											</div>
@@ -862,7 +1028,7 @@ export default function DevicesPage() {
 							<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
 								<SectionTitle icon="system_update_alt" text="Software Management & Remote Push" />
 								<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-									<button onClick={() => pushFileRef.current?.click()} className="flex items-center justify-center gap-2 p-3 bg-primary text-on-primary font-semibold text-[13px] rounded-xl hover:bg-primary/90 cursor-pointer">
+									<button onClick={() => pushFileRef.current?.click()} className="flex items-center justify-center gap-2 p-3 bg-accent text-on-primary font-semibold text-[13px] rounded-xl hover:bg-primary/90 hover:text-white cursor-pointer">
 										<span className="material-symbols-outlined text-base">upload_file</span> Push MSI / EXE Installer
 									</button>
 									<div className="flex items-center justify-center gap-2 p-3 bg-surface-container-high text-on-surface-variant font-medium text-[13px] rounded-xl border border-outline-variant/30">
@@ -873,17 +1039,220 @@ export default function DevicesPage() {
 
 								<div className="pt-2 space-y-2">
 									<span className="text-[12px] font-bold text-on-surface-variant uppercase tracking-wider block">Recent Commands</span>
+
+									{/* In-progress banner: elapsed time + average time to complete, live every 10s. */}
+									{(() => {
+										const active = (inspectDevice.commands ?? []).filter(
+											(c) => c.status === 'Pending' || c.status === 'Dispatched',
+										);
+										if (active.length === 0) return null;
+										const oldest = active.reduce(
+											(a, c) => (!a || Date.parse(c.createdAt) < Date.parse(a.createdAt) ? c : a),
+											null,
+										);
+										const elapsed = oldest?.createdAt ? (nowTick - Date.parse(oldest.createdAt)) / 1000 : 0;
+										const type = oldest?.type || 'Uninstall';
+										const avg = commandAvgSeconds(inspectDevice.commands, type);
+										return (
+											<div className="p-3 rounded-xl bg-accent/10 border border-accent/20 flex items-center gap-2.5 text-[12px]">
+												<Loader2 size={15} className="animate-spin text-accent shrink-0" />
+												<span className="text-on-surface font-medium">
+													{active.length} {type.toLowerCase()}{active.length > 1 ? 's' : ''} in progress · elapsed{' '}
+													<span className="font-mono font-semibold">{fmtSecs(elapsed)}</span>
+													{avg != null ? (
+														<> · avg ~<span className="font-mono font-semibold">{fmtSecs(avg)}</span></>
+													) : (
+														<span className="text-on-surface-variant"> · avg pending history</span>
+													)}
+												</span>
+											</div>
+										);
+									})()}
+
 									<div className="space-y-2 text-[12px]">
 										{(inspectDevice.commands ?? []).length === 0 && <span className="text-[12px] text-on-surface-variant">No software-management commands yet.</span>}
-										{(inspectDevice.commands ?? []).slice(0, 8).map((c) => (
-											<div key={c.id} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-outline-variant/30">
-												<span className="text-on-surface font-medium truncate"><span className="font-semibold">{c.type}</span> — {c.targetAppName || c.packageName || '—'}{c.resultMessage ? <span className="text-on-surface-variant"> · {c.resultMessage}</span> : ''}</span>
-												<span className={`px-2.5 py-0.5 rounded-md font-mono font-medium text-[11px] shrink-0 ml-2 ${c.status === 'Succeeded' ? 'bg-primary/10 text-primary' : c.status === 'Failed' ? 'bg-error/10 text-error' : 'bg-surface-container-high text-on-surface'}`}>{c.status}</span>
-											</div>
-										))}
+										{(inspectDevice.commands ?? []).slice(0, 8).map((c) => {
+											const activeCmd = c.status === 'Pending' || c.status === 'Dispatched';
+											const elapsed = activeCmd && c.createdAt ? (nowTick - Date.parse(c.createdAt)) / 1000 : null;
+											return (
+												<div key={c.id} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-outline-variant/30">
+													<span className="text-on-surface font-medium truncate"><span className="font-semibold">{c.type}</span> — {c.targetAppName || c.packageName || '—'}{c.resultMessage ? <span className="text-on-surface-variant"> · {c.resultMessage}</span> : ''}</span>
+													<span className="flex items-center gap-2 shrink-0 ml-2">
+														{elapsed != null && <span className="font-mono text-[11px] text-on-surface-variant">{fmtSecs(elapsed)}</span>}
+														<span className={`px-2.5 py-0.5 rounded-md font-mono font-medium text-[11px] ${c.status === 'Succeeded' ? 'bg-primary/10 text-primary' : c.status === 'Failed' ? 'bg-error/10 text-error' : c.status === 'Cancelled' ? 'bg-surface-container-high text-on-surface-variant' : 'bg-surface-container-high text-on-surface'}`}>{c.status}</span>
+														{activeCmd && (
+															<button
+																type="button"
+																title="Cancel this command"
+																disabled={cancellingCommandId === c.id}
+																onClick={() => handleCancelCommand(c.id)}
+																className="flex items-center justify-center w-6 h-6 rounded-md text-on-surface-variant hover:text-error hover:bg-error/10 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+															>
+																{cancellingCommandId === c.id ? <Loader2 size={14} className="animate-spin" /> : <StopCircle size={15} />}
+															</button>
+														)}
+													</span>
+												</div>
+											);
+										})}
 									</div>
 								</div>
 							</div>
+						</div>
+					</div>
+				</div>,
+				document.body
+			)}
+			{/* Uninstall Software Confirmation Card Overlay */}
+			{uninstallTargetApp && ReactDOM.createPortal(
+				<div className="fixed inset-0 z-[100001] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-150">
+					<div className="relative w-full max-w-md bg-background border border-rose-500/30 rounded-3xl shadow-2xl p-6 space-y-5 animate-in zoom-in-95 duration-150 overflow-hidden">
+						{/* Glow Background */}
+						<div className="absolute -top-12 -right-12 w-32 h-32 bg-rose-500/10 rounded-full blur-2xl pointer-events-none" />
+
+						<div className="flex items-start gap-4">
+							<div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-600 border border-rose-500/20 flex items-center justify-center shrink-0 shadow-sm">
+								<Trash2 size={22} />
+							</div>
+							<div className="flex-1 space-y-1">
+								<h3 className="text-lg font-extrabold text-primary tracking-tight">Confirm Software Uninstall</h3>
+								<p className="text-xs text-muted-foreground leading-relaxed">
+									Are you sure you want to uninstall <strong className="text-primary font-semibold">{uninstallTargetApp.name}</strong> from <strong className="text-primary font-semibold">{inspectDevice?.name}</strong>?
+								</p>
+							</div>
+						</div>
+
+						<div className="p-3.5 rounded-2xl bg-slate-100/90 border border-border/80 text-xs space-y-1.5">
+							<div className="flex justify-between text-muted-foreground">
+								<span>Target Application:</span>
+								<span className="font-bold text-primary">{uninstallTargetApp.name}</span>
+							</div>
+							{uninstallTargetApp.publisher && (
+								<div className="flex justify-between text-muted-foreground">
+									<span>Publisher:</span>
+									<span className="font-semibold text-primary">{uninstallTargetApp.publisher}</span>
+								</div>
+							)}
+							{uninstallTargetApp.version && (
+								<div className="flex justify-between text-muted-foreground">
+									<span>Version:</span>
+									<span className="font-mono text-primary">{uninstallTargetApp.version}</span>
+								</div>
+							)}
+						</div>
+
+						<div className="pt-2 flex items-center justify-end gap-3">
+							<button
+								type="button"
+								disabled={uninstalling}
+								onClick={() => setUninstallTargetApp(null)}
+								className="px-4 py-2.5 rounded-xl text-xs font-bold text-muted-foreground hover:text-primary hover:bg-slate-100 transition-colors cursor-pointer"
+							>
+								Cancel
+							</button>
+							<button
+								type="button"
+								disabled={uninstalling}
+								onClick={handleConfirmUninstall}
+								className="flex items-center gap-2 px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-600/20 hover:shadow-xl transition-all transform active:scale-95 disabled:opacity-50 cursor-pointer"
+							>
+								{uninstalling ? (
+									<>
+										<RefreshCw size={14} className="animate-spin" />
+										<span>Queuing Uninstall...</span>
+									</>
+								) : (
+									<>
+										<Trash2 size={14} />
+										<span>Confirm Uninstall</span>
+									</>
+								)}
+							</button>
+						</div>
+					</div>
+				</div>,
+				document.body
+			)}
+			{/* Push Software Installation Confirmation Card Overlay */}
+			{pendingInstallerFile && ReactDOM.createPortal(
+				<div className="fixed inset-0 z-[100001] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-150">
+					<div className="relative w-full max-w-md bg-background border border-accent/30 rounded-3xl shadow-2xl p-6 space-y-5 animate-in zoom-in-95 duration-150 overflow-hidden">
+						{/* Background Ambient Glow */}
+						<div className="absolute -top-12 -right-12 w-32 h-32 bg-accent/10 rounded-full blur-2xl pointer-events-none" />
+
+						<div className="flex items-start gap-4">
+							<div className="w-12 h-12 rounded-2xl bg-accent/10 text-accent border border-accent/20 flex items-center justify-center shrink-0 shadow-sm">
+								<UploadCloud size={22} />
+							</div>
+							<div className="flex-1 space-y-1">
+								<h3 className="text-lg font-extrabold text-primary tracking-tight">Push Software Installation</h3>
+								<p className="text-xs text-muted-foreground leading-relaxed">
+									Deploy software installer to target device <strong className="text-primary font-semibold">{inspectDevice?.name}</strong>.
+								</p>
+							</div>
+						</div>
+
+						{/* Package Details */}
+						<div className="p-3.5 rounded-2xl bg-slate-100/90 border border-border/80 text-xs space-y-1.5">
+							<div className="flex justify-between items-center text-muted-foreground">
+								<span>Installer Package:</span>
+								<span className="font-bold text-primary truncate max-w-[200px]" title={pendingInstallerFile.name}>
+									{pendingInstallerFile.name}
+								</span>
+							</div>
+							<div className="flex justify-between items-center text-muted-foreground">
+								<span>Package Size:</span>
+								<span className="font-mono font-semibold text-primary">{formatBytes(pendingInstallerFile.size)}</span>
+							</div>
+						</div>
+
+						{/* Silent Switch Input */}
+						<div className="space-y-2">
+							<label className="text-xs font-bold text-primary block">
+								Silent switch for this EXE (e.g. /S). Leave blank for MSI-style.
+							</label>
+							<input
+								type="text"
+								value={silentSwitchInput}
+								onChange={(e) => setSilentSwitchInput(e.target.value)}
+								placeholder="/S"
+								className="w-full bg-background border border-input rounded-xl px-4 py-2.5 text-xs font-mono font-bold text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all shadow-xs"
+							/>
+							<p className="text-[11px] text-muted-foreground leading-normal">
+								{pendingInstallerFile.name.toLowerCase().endsWith('.exe')
+									? 'EXE installers require silent parameters (e.g. /S, /VERYSILENT, /qn) to run unattended.'
+									: 'MSI packages run silently by default. Leave blank or specify custom flags.'}
+							</p>
+						</div>
+
+						{/* Modal Action Buttons */}
+						<div className="pt-2 flex items-center justify-end gap-3">
+							<button
+								type="button"
+								disabled={isUploadingInstaller}
+								onClick={() => setPendingInstallerFile(null)}
+								className="px-4 py-2.5 rounded-xl text-xs font-bold text-muted-foreground hover:text-primary hover:bg-slate-100 transition-colors cursor-pointer"
+							>
+								Cancel
+							</button>
+							<button
+								type="button"
+								disabled={isUploadingInstaller}
+								onClick={handleConfirmPushInstall}
+								className="flex items-center gap-2 px-5 py-2.5 bg-accent text-accent-foreground hover:bg-primary hover:text-white rounded-xl text-xs font-bold shadow-lg shadow-accent/20 hover:shadow-xl transition-all transform active:scale-95 disabled:opacity-50 cursor-pointer"
+							>
+								{isUploadingInstaller ? (
+									<>
+										<RefreshCw size={14} className="animate-spin" />
+										<span>Deploying...</span>
+									</>
+								) : (
+									<>
+										<UploadCloud size={14} />
+										<span>Confirm & Deploy</span>
+									</>
+								)}
+							</button>
 						</div>
 					</div>
 				</div>,
@@ -929,6 +1298,40 @@ function agentStatusMeta(dev) {
 		icon: 'cloud_off',
 		note: 'No recent check-in. The device may be powered off, offline, or the agent removed.',
 	};
+}
+
+// Windows Security overall posture, from the reported Defender status: secured
+// when real-time protection + antivirus are on, definitions are current, and no
+// active (unremediated) threats remain.
+function windowsSecurity(dev) {
+	const reported = dev.securityStatusUpdatedAt != null;
+	if (!reported) {
+		return { reported: false, secured: false };
+	}
+	const activeThreats = (dev.threats ?? []).some((t) => !t.remediated);
+	const sigOk = dev.defenderSignatureAgeDays == null || dev.defenderSignatureAgeDays <= 7;
+	const secured =
+		dev.defenderRealtime === true && dev.defenderAntivirus === true && !activeThreats && sigOk;
+	return { reported: true, secured };
+}
+
+function fmtSecs(s) {
+	if (s == null) return '—';
+	s = Math.max(0, Math.round(s));
+	const m = Math.floor(s / 60);
+	const sec = s % 60;
+	return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}
+
+// Average duration (seconds) of completed commands of a given type, from their
+// created->updated span. Null if there's no history yet.
+function commandAvgSeconds(commands, type) {
+	const done = (commands ?? []).filter(
+		(c) => c.type === type && (c.status === 'Succeeded' || c.status === 'Failed') && c.createdAt && c.updatedAt,
+	);
+	if (done.length === 0) return null;
+	const durs = done.map((c) => Math.max(0, (Date.parse(c.updatedAt) - Date.parse(c.createdAt)) / 1000));
+	return durs.reduce((a, b) => a + b, 0) / durs.length;
 }
 
 function boolLabel(v) {

@@ -235,6 +235,20 @@ export async function queueInstall(deviceId, packageId, type = 'install') {
   }
 }
 
+export async function cancelDeviceCommand(commandId) {
+  const res = await fetch(
+    `${API_BASE}/api/devices/commands/${encodeURIComponent(commandId)}/cancel`,
+    { method: 'POST', headers: credentialHeaders },
+  );
+  if (!res.ok) {
+    if (res.status === 404 || res.status === 409) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.message ?? `The command could not be cancelled (${res.status}).`);
+    }
+    throwForStatus(res.status);
+  }
+}
+
 // ---------- installer packages ----------
 
 export function fetchPackages() {
@@ -287,3 +301,39 @@ export async function createUser(input) {
   }
   return res.json();
 }
+
+export async function updateUser(id, input) {
+  const res = await fetch(`${API_BASE}/api/users/${id}`, {
+    method: 'PUT',
+    headers: jsonHeaders,
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throwForStatus(res.status);
+  return res.json();
+}
+
+export async function deleteUser(id) {
+  const res = await fetch(`${API_BASE}/api/users/${id}`, {
+    method: 'DELETE',
+    headers: credentialHeaders,
+  });
+  if (!res.ok) throwForStatus(res.status);
+  return res.json();
+}
+
+// ---------- license verification & product download ----------
+
+export async function verifyLicenseKey(licenseKey) {
+  const res = await fetch(`${API_BASE}/api/verify-license-download`, {
+    method: 'POST',
+    headers: jsonHeaders,
+    body: JSON.stringify({ licenseKey }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error || 'Invalid or expired license key. Please check your key and try again.');
+  }
+  return data;
+}
+

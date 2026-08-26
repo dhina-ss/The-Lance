@@ -41,6 +41,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Temporary build artifacts
-(index)
-@react-refresh
+# Built installer binaries served by the download endpoint (not versioned)
+backend/artifacts/*.exe
+backend/artifacts/*.zip
+
+# The C# agent lives in its own git repository (dhina-ss/EndPoint-Management).
+# Keep it out of this deploy repo so it is never embedded as a stray gitlink
+# and its build output never bloats the Render clone.
+/EMS/

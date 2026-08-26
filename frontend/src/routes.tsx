@@ -9,6 +9,7 @@ import LoginPage from './pages/login';
 import DashboardPage from './pages/dashboard';
 import TenantDashboardPage from './pages/tenant-dashboard';
 import ProductConsolePage from './pages/dashboard/products';
+import InvoicesPage from './pages/dashboard/invoices';
 import TenantListPage from './pages/dashboard/tenants';
 import TenantDetailsPage from './pages/dashboard/tenant-details';
 import EndpointManagementPage from './pages/products/endpoint-management';
@@ -59,6 +60,10 @@ export const routes: RouteObject[] = [
     {
         path: '/dashboard/products',
         element: <ProductConsolePage />,
+    },
+    {
+        path: '/dashboard/invoices',
+        element: <InvoicesPage />,
     },
     {
         path: '/dashboard/products/:productId',

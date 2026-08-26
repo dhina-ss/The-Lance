@@ -1,5 +1,5 @@
 import { Helmet } from '@dr.pogodin/react-helmet';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
@@ -11,12 +11,15 @@ import {
     MapPin,
     User,
     Check,
+    ChevronLeft,
     ChevronRight,
+    ChevronDown,
     Lock,
     Key,
     AlertTriangle,
     CheckCircle2,
     XCircle,
+    X,
     Calendar,
     Users,
     Shield,
@@ -30,10 +33,42 @@ import {
     Filter,
     Edit3,
     Copy,
-    ChevronDown,
+    Eye,
+    EyeOff,
+    CreditCard,
+    AlertCircle,
 } from 'lucide-react';
 import { getProduct } from '../../lib/products';
 import DashboardSidebar from '../../components/DashboardSidebar';
+import { credentialHeaders, jsonHeaders } from '../../api/client';
+
+export function generateLicenseKey(): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let key = '';
+    for (let i = 0; i < 16; i++) {
+        key += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return key;
+}
+
+export function formatLicenseKey(key: string): string {
+    const clean = (key || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const parts = clean.match(/.{1,4}/g);
+    return parts ? parts.join('-') : clean;
+}
+
+export function formatTenantId(id: string | number): string {
+    if (!id) return 'TL-TNT260001';
+    const str = String(id).trim();
+    if (/^TL-TNT\d{6}$/i.test(str)) {
+        return str.toUpperCase();
+    }
+    const numericMatch = str.match(/\d+/);
+    const num = numericMatch ? parseInt(numericMatch[0], 10) : 1;
+    const yearStr = new Date().getFullYear().toString().slice(-2);
+    const seqStr = String(num).padStart(4, '0');
+    return `TL-TNT${yearStr}${seqStr}`;
+}
 
 const fadeUp = {
     hidden: { opacity: 0, y: 24 },
@@ -124,48 +159,152 @@ interface ModuleConfig {
 
 const initialModules: ModuleConfig[] = [
     {
-        id: 'mod-ems-core',
-        name: 'Real-Time Endpoint Monitoring',
-        description: 'Continuously track system health, RAM, CPU, and disk metrics across all endpoints.',
-        category: 'Endpoint Security',
+        id: 'usb-blocking',
+        name: 'USB Blocking',
+        description: 'Block unauthorized USB storage drives, external flash drives, and unverified peripheral devices.',
+        category: 'Device Control',
         enabled: true,
     },
     {
-        id: 'mod-patch-mgmt',
-        name: 'Automated Patch Management',
-        description: 'Schedule OS and third-party software security patch deployment automatically.',
-        category: 'Compliance',
+        id: 'installed-apps',
+        name: 'Installed Applications',
+        description: 'Inventory, audit, and track all software packages installed across organization endpoints.',
+        category: 'Software Inventory',
         enabled: true,
     },
     {
-        id: 'mod-remote-control',
-        name: 'Remote Desktop Control',
-        description: 'Encrypted, low-latency remote screen sharing and terminal control.',
-        category: 'Remote Ops',
+        id: 'used-apps',
+        name: 'Used Applications',
+        description: 'Monitor application usage statistics, active runtime hours, and foreground app activity analytics.',
+        category: 'App Analytics',
         enabled: true,
     },
     {
-        id: 'mod-ticket-routing',
-        name: 'Smart Ticket Auto-Routing',
-        description: 'AI-powered helpdesk ticket tagging, prioritization, and technician assignment.',
-        category: 'Helpdesk Ops',
+        id: 'website-blocking',
+        name: 'Website Blocking',
+        description: 'Enforce web content filtering to block malicious, unapproved, or high-risk URLs and web domains.',
+        category: 'Web Security',
         enabled: true,
     },
     {
-        id: 'mod-sla-tracking',
-        name: 'SLA Escalation Alerts',
-        description: 'Automated SLA breach warning notifications via Webhooks, Slack, and SMS.',
-        category: 'Helpdesk Ops',
-        enabled: false,
+        id: 'install-uninstall-apps',
+        name: 'Install / Uninstall Apps',
+        description: 'Remotely push software installations or silently uninstall prohibited packages across managed devices.',
+        category: 'App Deployment',
+        enabled: true,
     },
     {
-        id: 'mod-audit-vault',
-        name: 'Immutable Audit Vault',
-        description: 'Store tamper-proof security audit trails for regulatory compliance.',
-        category: 'Compliance',
+        id: 'location-tracking',
+        name: 'Location Tracking',
+        description: 'Real-time GPS and network geo-location mapping for company-owned endpoints and mobile assets.',
+        category: 'Asset Tracking',
+        enabled: true,
+    },
+    {
+        id: 'login-device-on',
+        name: 'Login When Device Turn On',
+        description: 'Enforce mandatory user login authentication and capture session events when device turns on.',
+        category: 'Access Control',
         enabled: true,
     },
 ];
+
+/* ── Custom Select Option Interface & Dropdown Component ── */
+interface CustomSelectOption {
+    value: string;
+    label: string;
+}
+
+function CustomSelect({
+    value,
+    onChange,
+    options,
+    placeholder = 'Select option',
+    fullWidth = false,
+    openUp = false,
+    onOpenChange,
+}: {
+    value: string;
+    onChange: (val: string) => void;
+    options: CustomSelectOption[];
+    placeholder?: string;
+    fullWidth?: boolean;
+    openUp?: boolean;
+    onOpenChange?: (open: boolean) => void;
+}) {
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                if (isOpen) {
+                    setIsOpen(false);
+                    onOpenChange?.(false);
+                }
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isOpen, onOpenChange]);
+
+    const selectedOption = options.find((opt) => opt.value === value);
+
+    const toggleOpen = () => {
+        setIsOpen((prev) => {
+            const next = !prev;
+            onOpenChange?.(next);
+            return next;
+        });
+    };
+
+    return (
+        <div className={`relative inline-block text-left ${fullWidth ? 'w-full' : ''}`} ref={dropdownRef}>
+            <button
+                type="button"
+                onClick={toggleOpen}
+                className={`px-3.5 py-2.5 bg-background border border-input rounded-xl text-xs font-semibold text-primary focus:outline-none focus:border-accent hover:border-accent/60 transition-all flex items-center justify-between gap-2 shadow-sm cursor-pointer ${
+                    fullWidth ? 'w-full' : 'min-w-[140px]'
+                }`}
+            >
+                <span className="truncate">{selectedOption ? selectedOption.label : placeholder}</span>
+                <ChevronDown size={14} className={`text-muted-foreground transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180 text-accent' : ''}`} />
+            </button>
+
+            {isOpen && (
+                <div className={`absolute rounded-xl bg-background border border-border/80 shadow-2xl z-[100] p-1.5 animate-in fade-in zoom-in-95 duration-150 overflow-hidden ${
+                    openUp ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+                } ${
+                    fullWidth ? 'w-full left-0' : 'w-44 left-0'
+                }`}>
+                    <div className="space-y-0.5 max-h-60 overflow-y-auto py-0.5">
+                        {options.map((opt) => {
+                            const isSelected = opt.value === value;
+                            return (
+                                <button
+                                    key={opt.value}
+                                    type="button"
+                                    onClick={() => {
+                                        onChange(opt.value);
+                                        setIsOpen(false);
+                                    }}
+                                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                        isSelected
+                                            ? 'bg-accent/15 text-accent font-bold'
+                                            : 'text-primary hover:bg-slate-100 hover:text-accent'
+                                    }`}
+                                >
+                                    <span>{opt.label}</span>
+                                    {isSelected && <Check size={13} className="text-accent shrink-0" />}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
 
 /* ── Audit Category Filter Dropdown ── */
 const AUDIT_CATEGORIES = ['All', 'Status', 'Subscription', 'Security', 'Module', 'Admin'] as const;
@@ -230,16 +369,319 @@ function AuditCategorySelect({
     );
 }
 
+/* ── Days Remaining Calculation Helper ── */
+function getDaysRemaining(expiryDateStr: string): { days: number; text: string; colorClass: string } {
+    if (!expiryDateStr) return { days: 0, text: 'Expired', colorClass: 'bg-rose-500/10 text-rose-600 border-rose-500/30' };
+
+    const parts = expiryDateStr.split('-');
+    let expiryDate: Date;
+    if (parts.length === 3) {
+        expiryDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    } else {
+        expiryDate = new Date(expiryDateStr);
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    expiryDate.setHours(0, 0, 0, 0);
+
+    const diffTime = expiryDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) {
+        return { days: diffDays, text: 'Expired', colorClass: 'bg-rose-500/10 text-rose-600 border-rose-500/20' };
+    } else if (diffDays === 0) {
+        return { days: 0, text: 'Expires Today', colorClass: 'bg-amber-500/10 text-amber-600 border-amber-500/20' };
+    } else if (diffDays === 1) {
+        return { days: 1, text: '1 day left', colorClass: 'bg-amber-500/10 text-amber-600 border-amber-500/20' };
+    } else if (diffDays <= 30) {
+        return { days: diffDays, text: `${diffDays} days left`, colorClass: 'bg-amber-500/10 text-amber-600 border-amber-500/20' };
+    } else {
+        return { days: diffDays, text: `${diffDays} days left`, colorClass: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' };
+    }
+}
+
+/* ── Modern Calendar Date Picker Component ── */
+function getDaysInMonth(year: number, month: number) {
+    const days = [];
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const prevMonthLastDate = new Date(year, month, 0).getDate();
+
+    // Previous month padding days
+    for (let i = firstDayIndex - 1; i >= 0; i--) {
+        days.push({
+            day: prevMonthLastDate - i,
+            isCurrentMonth: false,
+            dateObj: new Date(year, month - 1, prevMonthLastDate - i),
+        });
+    }
+
+    // Current month days
+    const lastDate = new Date(year, month + 1, 0).getDate();
+    for (let i = 1; i <= lastDate; i++) {
+        days.push({
+            day: i,
+            isCurrentMonth: true,
+            dateObj: new Date(year, month, i),
+        });
+    }
+
+    // Next month padding days to complete calendar grid
+    const remainingCells = (7 - (days.length % 7)) % 7;
+    for (let i = 1; i <= remainingCells; i++) {
+        days.push({
+            day: i,
+            isCurrentMonth: false,
+            dateObj: new Date(year, month + 1, i),
+        });
+    }
+
+    return days;
+}
+
+interface ModernDatePickerProps {
+    value: string; // YYYY-MM-DD
+    onChange: (val: string) => void;
+    placeholder?: string;
+    openUp?: boolean;
+    disablePast?: boolean;
+}
+
+function ModernDatePicker({
+    value,
+    onChange,
+    placeholder = 'Select expiry date',
+    openUp = false,
+    disablePast = true,
+}: ModernDatePickerProps) {
+    const [isOpen, setIsOpen] = useState(false);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Close on click outside
+    useEffect(() => {
+        function handleClickOutside(e: MouseEvent) {
+            if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+                setIsOpen(false);
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const todayStr = useMemo(() => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }, []);
+
+    const parsedDate = useMemo(() => {
+        if (!value) return new Date();
+        const parts = value.split('-');
+        if (parts.length === 3) {
+            const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+            const iso = `${parts[0]}-${parts[1]}-${parts[2]}`;
+            if (disablePast && iso < todayStr) return new Date();
+            return d;
+        }
+        return new Date();
+    }, [value, disablePast, todayStr]);
+
+    const [viewDate, setViewDate] = useState<Date>(parsedDate);
+
+    // Sync viewDate when value changes or when opening
+    useEffect(() => {
+        if (value) {
+            const parts = value.split('-');
+            if (parts.length === 3) {
+                setViewDate(new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+            }
+        }
+    }, [value, isOpen]);
+
+    const daysGrid = useMemo(() => {
+        return getDaysInMonth(viewDate.getFullYear(), viewDate.getMonth());
+    }, [viewDate]);
+
+    const isPrevMonthDisabled = useMemo(() => {
+        if (!disablePast) return false;
+        const now = new Date();
+        return (
+            viewDate.getFullYear() < now.getFullYear() ||
+            (viewDate.getFullYear() === now.getFullYear() && viewDate.getMonth() <= now.getMonth())
+        );
+    }, [disablePast, viewDate]);
+
+    function formatISO(d: Date) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    function formatDisplay(isoStr: string) {
+        if (!isoStr) return '';
+        const parts = isoStr.split('-');
+        if (parts.length !== 3) return isoStr;
+        const year = parts[0];
+        const month = parts[1];
+        const day = parts[2];
+        return `${day}-${month}-${year}`;
+    }
+
+    function handleSelectDate(d: Date) {
+        const iso = formatISO(d);
+        if (disablePast && iso < todayStr) return;
+        onChange(iso);
+        setIsOpen(false);
+    }
+
+    function handleAddDays(daysToAdd: number) {
+        const current = value && (!disablePast || value >= todayStr) ? new Date(value) : new Date();
+        current.setDate(current.getDate() + daysToAdd);
+        const iso = formatISO(current);
+        if (disablePast && iso < todayStr) return;
+        onChange(iso);
+        setViewDate(current);
+        setIsOpen(false);
+    }
+
+    return (
+        <div className="relative" ref={containerRef}>
+            {/* Custom Input Trigger */}
+            <div
+                onClick={() => setIsOpen((o) => !o)}
+                className="w-full px-4 py-2.5 bg-background border border-input rounded-xl text-xs font-semibold text-primary flex items-center justify-between cursor-pointer hover:border-accent transition-all shadow-sm"
+            >
+                <div className="flex items-center gap-2">
+                    <Calendar className="text-accent shrink-0" size={15} />
+                    <span className={value ? 'text-primary font-bold font-mono text-sm' : 'text-muted-foreground'}>
+                        {value ? formatDisplay(value) : placeholder}
+                    </span>
+                </div>
+                <ChevronDown size={14} className={`text-muted-foreground transition-transform duration-150 ${isOpen ? 'rotate-180 text-accent' : ''}`} />
+            </div>
+
+            {/* Floating Modern Calendar Dropdown */}
+            {isOpen && (
+                <div className={`absolute left-0 z-[100] w-72 bg-background border border-border/90 rounded-2xl shadow-2xl p-4 text-xs select-none animate-in fade-in zoom-in-95 duration-150 ${
+                    openUp ? 'bottom-full mb-2' : 'top-full mt-1.5'
+                }`}>
+                    {/* Header Controls */}
+                    <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-border">
+                        <div className="font-extrabold text-primary text-sm flex items-center gap-1.5">
+                            <span>{viewDate.toLocaleString('default', { month: 'long' })}</span>
+                            <span className="text-accent">{viewDate.getFullYear()}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <button
+                                type="button"
+                                disabled={isPrevMonthDisabled}
+                                onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))}
+                                className={`p-1 rounded-lg transition-colors ${
+                                    isPrevMonthDisabled
+                                        ? 'text-muted-foreground/30 cursor-not-allowed'
+                                        : 'text-muted-foreground hover:text-primary hover:bg-slate-100 cursor-pointer'
+                                }`}
+                            >
+                                <ChevronLeft size={16} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))}
+                                className="p-1 text-muted-foreground hover:text-primary hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                            >
+                                <ChevronRight size={16} />
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Day Names Header */}
+                    <div className="grid grid-cols-7 text-center font-extrabold text-[10px] uppercase text-muted-foreground mb-1.5 tracking-wider">
+                        <span>Su</span>
+                        <span>Mo</span>
+                        <span>Tu</span>
+                        <span>We</span>
+                        <span>Th</span>
+                        <span>Fr</span>
+                        <span>Sa</span>
+                    </div>
+
+                    {/* Days Grid */}
+                    <div className="grid grid-cols-7 gap-1 text-center font-medium mb-3">
+                        {daysGrid.map((cell, idx) => {
+                            const cellISO = formatISO(cell.dateObj);
+                            const isSelected = value === cellISO;
+                            const isPast = disablePast && cellISO < todayStr;
+
+                            return (
+                                <button
+                                    key={idx}
+                                    type="button"
+                                    disabled={isPast}
+                                    onClick={() => handleSelectDate(cell.dateObj)}
+                                    className={`h-8 w-8 mx-auto flex items-center justify-center rounded-xl text-xs transition-all ${
+                                        isPast
+                                            ? 'text-muted-foreground/30 opacity-40 cursor-not-allowed pointer-events-none line-through'
+                                            : isSelected
+                                            ? 'bg-accent text-accent-foreground font-bold shadow-md scale-105'
+                                            : cell.isCurrentMonth
+                                            ? 'text-primary hover:bg-accent/15 hover:text-accent font-semibold cursor-pointer'
+                                            : 'text-muted-foreground/30 hover:bg-slate-100 cursor-pointer'
+                                    }`}
+                                >
+                                    {cell.day}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Quick Presets & Controls */}
+                    <div className="pt-2 border-t border-border flex items-center justify-between text-[11px] font-semibold">
+                        <div className="flex items-center gap-1.5">
+                            <button
+                                type="button"
+                                onClick={() => handleAddDays(30)}
+                                className="px-2.5 py-1 bg-accent/10 text-accent hover:bg-accent hover:text-accent-foreground rounded-lg transition-colors cursor-pointer font-bold"
+                            >
+                                +30 Days
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleAddDays(365)}
+                                className="px-2.5 py-1 bg-accent/10 text-accent hover:bg-accent hover:text-accent-foreground rounded-lg transition-colors cursor-pointer font-bold"
+                            >
+                                +1 Year
+                            </button>
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={() => {
+                                const today = new Date();
+                                onChange(formatISO(today));
+                                setViewDate(today);
+                                setIsOpen(false);
+                            }}
+                            className="text-accent hover:underline cursor-pointer font-bold"
+                        >
+                            Today
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 /* ── Initial Mock Tenant Details ── */
 const mockTenantData = {
     id: 'tnt-1',
     productId: 'ems',
     companyName: 'Nexus Global Tech',
     domain: 'nexusglobal.com',
-    industry: 'Technology',
-    region: 'North America',
     orgId: 'ORG-99482-NX',
-    taxId: 'US-94827103',
     address: '100 Innovation Way, Suite 400',
     city: 'San Francisco, CA',
     country: 'United States',
@@ -252,6 +694,7 @@ const mockTenantData = {
     expiryDate: '2026-11-12',
     activeUsersCount: 742,
     maxUsers: 1000,
+    licenseKey: 'TL9K-8F7E-6D5C-4B3A',
 };
 
 export default function TenantDetailsPage() {
@@ -267,10 +710,7 @@ export default function TenantDetailsPage() {
             productId: 'tickets',
             companyName: 'TechFlow Solutions',
             domain: 'techflow.io',
-            industry: 'Technology',
-            region: 'North America',
             orgId: 'ORG-88310-TF',
-            taxId: 'US-8831054',
             address: '450 Cyber Way, Suite 1200',
             city: 'Austin, TX',
             country: 'United States',
@@ -283,13 +723,86 @@ export default function TenantDetailsPage() {
             expiryDate: '2027-02-10',
             activeUsersCount: 340,
             maxUsers: 500,
+            licenseKey: 'TL8B-7C6D-5E4F-3G2H',
         }
         : mockTenantData;
+
+    useEffect(() => {
+        try {
+            const u = localStorage.getItem('user_profile') || localStorage.getItem('auth_token');
+            if (!u) {
+                navigate('/login', { replace: true });
+            }
+        } catch {
+            navigate('/login', { replace: true });
+        }
+    }, [navigate]);
 
     // Tenant State
     const [tenant, setTenant] = useState(initialTenant);
     const [modules, setModules] = useState<ModuleConfig[]>(initialModules);
     const [auditLogs, setAuditLogs] = useState<AuditLog[]>(mockAuditLogs);
+
+    useEffect(() => {
+        const targetId = tenantId || productId;
+        if (!targetId) return;
+
+        fetch(`/api/tenants/${targetId}`, { headers: credentialHeaders })
+            .then((res) => {
+                if (res.ok) return res.json();
+                return fetch('/api/tenants', { headers: credentialHeaders }).then((r) => r.json()).then((list: any[]) => {
+                    return list.find((t) => String(t.id) === String(targetId) || t.tenantName.toLowerCase() === targetId.toLowerCase());
+                });
+            })
+            .then((d: any) => {
+                if (d && d.tenantName) {
+                    const parsedMaxUsers = d.maxUsers !== undefined && d.maxUsers !== null ? Number(d.maxUsers) : 100;
+                    setTenant({
+                        id: String(d.id),
+                        productId: (d.productName || 'ems').toLowerCase(),
+                        companyName: d.tenantName,
+                        domain: d.tenantMail ? (d.tenantMail.includes('@') ? d.tenantMail.split('@')[1] : d.tenantMail) : 'domain.com',
+                        orgId: formatTenantId(d.id),
+                        address: d.address || '100 Innovation Way, Suite 400',
+                        city: 'San Francisco, CA',
+                        country: 'United States',
+                        adminName: d.adminMail ? (d.adminMail.includes('@') ? d.adminMail.split('@')[0] : d.adminMail) : 'Admin',
+                        adminEmail: d.adminMail || 'admin@domain.com',
+                        adminPhone: d.mobileNumber || '+1 (555) 382-9102',
+                        status: (d.status || 'Active') as any,
+                        plan: (d.planType === 'Pro' ? 'Professional' : (d.planType || 'Enterprise')) as any,
+                        startDate: '2025-11-12',
+                        expiryDate: d.expiryDate || '2026-11-12',
+                        activeUsersCount: Math.min(100, parsedMaxUsers),
+                        maxUsers: parsedMaxUsers,
+                        licenseKey: d.licenseKey || '',
+                    });
+                    if (d.featureModules) {
+                        let mappedModules = initialModules;
+                        if (Array.isArray(d.featureModules)) {
+                            const enabledSet = new Set(
+                                d.featureModules.map((item: any) =>
+                                    (typeof item === 'string' ? item : (item && (item.name || item.id)) || '').toLowerCase()
+                                )
+                            );
+                            mappedModules = initialModules.map((m) => ({
+                                ...m,
+                                enabled: enabledSet.has(m.id.toLowerCase()) || enabledSet.has(m.name.toLowerCase()),
+                            }));
+                        } else if (typeof d.featureModules === 'object') {
+                            const dict = d.featureModules as Record<string, boolean>;
+                            mappedModules = initialModules.map((m) => {
+                                if (m.name in dict) return { ...m, enabled: Boolean(dict[m.name]) };
+                                if (m.id in dict) return { ...m, enabled: Boolean(dict[m.id]) };
+                                return m;
+                            });
+                        }
+                        setModules(mappedModules);
+                    }
+                }
+            })
+            .catch((err) => console.log('Error fetching tenant details from DB:', err));
+    }, [tenantId, productId]);
 
     // Active Tab state
     const [activeTab, setActiveTab] = useState<'overview' | 'modules' | 'security' | 'audit'>('overview');
@@ -300,11 +813,196 @@ export default function TenantDetailsPage() {
     // Reset Password Modal state
     const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
     const [newPassword, setNewPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(true);
     const [passwordCopied, setPasswordCopied] = useState(false);
 
     // Suspend Modal state
     const [isSuspendModalOpen, setIsSuspendModalOpen] = useState(false);
     const [suspendReason, setSuspendReason] = useState('');
+
+    // Edit Tenant Details Modal (3-Step Wizard Flow) state
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editStep, setEditStep] = useState<number>(1);
+    const [showEditSuccessCard, setShowEditSuccessCard] = useState(false);
+
+    // Step 1: Company Info
+    const [editName, setEditName] = useState('');
+    const [editDomain, setEditDomain] = useState('');
+    const [editAddress, setEditAddress] = useState('');
+    const [editPhone, setEditPhone] = useState('');
+
+    // Step 2: Plan Details
+    const [editLicenseKey, setEditLicenseKey] = useState('');
+    const [editCopiedLicenseKey, setEditCopiedLicenseKey] = useState(false);
+    const [editSelectedProducts, setEditSelectedProducts] = useState<string[]>(['EMS']);
+    const [isEditProductDropdownOpen, setIsEditProductDropdownOpen] = useState(false);
+    const [editStatus, setEditStatus] = useState<'Active' | 'Pending' | 'Inactive' | 'Suspended'>('Active');
+    const [editPlan, setEditPlan] = useState<'Standard' | 'Professional' | 'Enterprise'>('Enterprise');
+    const [editSubscriptionType, setEditSubscriptionType] = useState<'Annual Recurring' | 'Monthly Billing' | 'Perpetual License'>('Annual Recurring');
+    const [editExpiryDate, setEditExpiryDate] = useState('');
+    const [editMaxUsers, setEditMaxUsers] = useState<number | string>(100);
+    const [editActiveOpenDropdown, setEditActiveOpenDropdown] = useState<'none' | 'product' | 'status' | 'plan' | 'sub'>('none');
+
+    // Step 3: Admin Details
+    const [editAdminName, setEditAdminName] = useState('');
+    const [editAdminEmail, setEditAdminEmail] = useState('');
+    const [editAdminPassword, setEditAdminPassword] = useState('');
+    const [editAdminConfirmPassword, setEditAdminConfirmPassword] = useState('');
+    const [editPasswordError, setEditPasswordError] = useState<string | null>(null);
+    const [showEditAdminPassword, setShowEditAdminPassword] = useState(false);
+    const [showEditAdminConfirmPassword, setShowEditAdminConfirmPassword] = useState(false);
+
+    function handleOpenEditModal() {
+        setEditStep(1);
+        setShowEditSuccessCard(false);
+        setEditPasswordError(null);
+        setEditName(tenant.companyName);
+        setEditDomain(tenant.domain);
+        setEditAddress(tenant.address);
+        setEditPhone(tenant.adminPhone ? tenant.adminPhone.replace(/\D/g, '') : '');
+        setEditLicenseKey((tenant as any).licenseKey || generateLicenseKey());
+        setEditCopiedLicenseKey(false);
+        setEditSelectedProducts([tenant.productId.toUpperCase()]);
+        setIsEditProductDropdownOpen(false);
+        setEditStatus(tenant.status as any);
+        setEditPlan(tenant.plan);
+        setEditSubscriptionType('Annual Recurring');
+        setEditExpiryDate(tenant.expiryDate);
+        setEditMaxUsers(tenant.maxUsers);
+        setEditAdminName(tenant.adminName);
+        setEditAdminEmail(tenant.adminEmail);
+        setEditAdminPassword('');
+        setEditAdminConfirmPassword('');
+        setShowEditAdminPassword(false);
+        setShowEditAdminConfirmPassword(false);
+        setEditActiveOpenDropdown('none');
+        setIsEditModalOpen(true);
+    }
+
+    function handleGoToStep2() {
+        if (!editName.trim()) {
+            showToast('Tenant Company Name is required');
+            return;
+        }
+        if (!editAddress.trim()) {
+            showToast('Tenant Address is required');
+            return;
+        }
+        if (!editDomain.trim()) {
+            showToast('Primary Domain is required');
+            return;
+        }
+        if (!editPhone.trim()) {
+            showToast('Mobile Number is required');
+            return;
+        }
+        setEditStep(2);
+    }
+
+    function handleGoToStep3() {
+        if (!editLicenseKey.trim()) {
+            showToast('License Key is required');
+            return;
+        }
+        if (editSelectedProducts.length === 0) {
+            showToast('Select at least one product platform');
+            return;
+        }
+        setEditStep(3);
+    }
+
+    function handleCopyEditLicenseKey() {
+        navigator.clipboard.writeText(formatLicenseKey(editLicenseKey));
+        setEditCopiedLicenseKey(true);
+        showToast('License Key copied to clipboard');
+        setTimeout(() => setEditCopiedLicenseKey(false), 2000);
+    }
+
+    function handleSaveEditTenant(e: React.FormEvent) {
+        e.preventDefault();
+
+        if (!editAdminPassword.trim()) {
+            setEditPasswordError('Admin password is required');
+            showToast('Admin password is required');
+            return;
+        }
+
+        if (!editAdminConfirmPassword.trim()) {
+            setEditPasswordError('Please confirm admin password');
+            showToast('Please confirm admin password');
+            return;
+        }
+
+        if (editAdminPassword !== editAdminConfirmPassword) {
+            setEditPasswordError('Passwords do not match');
+            showToast('Passwords do not match');
+            return;
+        }
+
+        setEditPasswordError(null);
+
+        const payload = {
+            tenantName: editName.trim(),
+            productName: editSelectedProducts.join(', ') || tenant.productId.toUpperCase(),
+            planType: editPlan,
+            subscriptionType: editSubscriptionType,
+            expiryDate: editExpiryDate,
+            hasTrial: 'None',
+            tenantMail: `contact@${editDomain.trim()}`,
+            adminMail: editAdminEmail.trim(),
+            status: editStatus,
+            address: editAddress.trim(),
+            mobileNumber: editPhone.trim(),
+            maxUsers: Number(editMaxUsers) || 100,
+            licenseKey: formatLicenseKey(editLicenseKey),
+        };
+
+        fetch(`/api/tenants/${tenant.id}`, {
+            method: 'PUT',
+            headers: jsonHeaders,
+            body: JSON.stringify(payload),
+        })
+            .then((res) => {
+                if (res.ok) {
+                    setTenant((prev) => ({
+                        ...prev,
+                        companyName: editName.trim(),
+                        domain: editDomain.trim(),
+                        address: editAddress.trim(),
+                        adminPhone: editPhone.trim(),
+                        adminName: editAdminName.trim(),
+                        adminEmail: editAdminEmail.trim(),
+                        status: editStatus as any,
+                        plan: editPlan as any,
+                        expiryDate: editExpiryDate,
+                        maxUsers: Number(editMaxUsers) || 100,
+                    }));
+                    setShowEditSuccessCard(true);
+                    addAuditLog('Updated tenant details', 'Status');
+                    showToast('Tenant details updated successfully');
+                } else {
+                    throw new Error('Failed to update tenant');
+                }
+            })
+            .catch((err) => {
+                console.error('Error updating tenant details in DB:', err);
+                setTenant((prev) => ({
+                    ...prev,
+                    companyName: editName.trim(),
+                    domain: editDomain.trim(),
+                    address: editAddress.trim(),
+                    adminPhone: editPhone.trim(),
+                    adminName: editAdminName.trim(),
+                    adminEmail: editAdminEmail.trim(),
+                    status: editStatus as any,
+                    plan: editPlan as any,
+                    expiryDate: editExpiryDate,
+                    maxUsers: Number(editMaxUsers) || 100,
+                }));
+                setShowEditSuccessCard(true);
+                showToast('Tenant details updated locally');
+            });
+    }
 
     // Audit log search & category filter
     const [logSearch, setLogSearch] = useState('');
@@ -361,8 +1059,8 @@ export default function TenantDetailsPage() {
     }
 
     function handleToggleModule(modId: string) {
-        setModules((prev) =>
-            prev.map((m) => {
+        setModules((prev) => {
+            const nextModules = prev.map((m) => {
                 if (m.id === modId) {
                     const nextVal = !m.enabled;
                     addAuditLog(`${nextVal ? 'Enabled' : 'Disabled'} module: ${m.name}`, 'Module');
@@ -370,15 +1068,56 @@ export default function TenantDetailsPage() {
                     return { ...m, enabled: nextVal };
                 }
                 return m;
+            });
+
+            // Construct Dict object { "USB Blocking": true, "Website Blocking": false, ... }
+            const modulesDict: Record<string, boolean> = {};
+            nextModules.forEach((m) => {
+                modulesDict[m.name] = m.enabled;
+            });
+
+            const targetTenantId = tenant.id || tenantId || '1';
+
+            // Save to Neon DB tenant-wise (stores Dict of module_name: boolean)
+            fetch(`/api/tenants/${targetTenantId}/modules`, {
+                method: 'PUT',
+                headers: jsonHeaders,
+                body: JSON.stringify({ featureModules: modulesDict }),
             })
-        );
+                .then((res) => res.json())
+                .then((data) => {
+                    console.log('Successfully saved modules to Neon DB for tenant:', targetTenantId, data);
+                })
+                .catch((err) => console.error('Error saving tenant feature modules to DB:', err));
+
+            // Save to tenant-specific localStorage key as fallback
+            try {
+                localStorage.setItem(`tenant_${targetTenantId}_enabled_modules`, JSON.stringify(modulesDict));
+            } catch {}
+            return nextModules;
+        });
     }
 
     function handleGenerateNewPassword() {
         const generated = 'Nx$' + Math.random().toString(36).slice(-8) + '!2026';
         setNewPassword(generated);
         setPasswordCopied(false);
+    }
+
+    function handleOpenResetPasswordModal() {
+        handleGenerateNewPassword();
+        setShowPassword(true);
+        setIsPasswordModalOpen(true);
+    }
+
+    function handleSavePassword() {
+        if (!newPassword.trim()) {
+            showToast('Password cannot be empty');
+            return;
+        }
         addAuditLog(`Reset company admin password for ${tenant.adminEmail}`, 'Security', 'Warning');
+        showToast('Admin password updated successfully');
+        setIsPasswordModalOpen(false);
     }
 
     function handleCopyPassword() {
@@ -401,6 +1140,19 @@ export default function TenantDetailsPage() {
         return matchesSearch && matchesCat;
     });
 
+    // Audit Log Pagination State
+    const [logPage, setLogPage] = useState(1);
+    const logsPerPage = 5;
+
+    useEffect(() => {
+        setLogPage(1);
+    }, [logSearch, logCategoryFilter]);
+
+    const totalLogPages = Math.max(1, Math.ceil(filteredLogs.length / logsPerPage));
+    const logStartIndex = (logPage - 1) * logsPerPage;
+    const logEndIndex = logStartIndex + logsPerPage;
+    const paginatedLogs = filteredLogs.slice(logStartIndex, logEndIndex);
+
     return (
         <>
             <Helmet>
@@ -417,7 +1169,7 @@ export default function TenantDetailsPage() {
             )}
 
             <div className="relative h-screen bg-background flex flex-col lg:flex-row overflow-hidden">
-                <DashboardSidebar activeItem="products" />
+                <DashboardSidebar activeItem="tenants" />
 
                 <main className="w-full lg:w-[80%] flex-1 relative h-screen p-6 lg:p-10 overflow-y-auto overflow-x-hidden">
                     {/* Dot Grid Backdrop */}
@@ -464,17 +1216,10 @@ export default function TenantDetailsPage() {
                                         <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
                                             <Building2 size={14} className="text-accent" />
                                             <span 
-                                                onClick={() => navigate('/dashboard/products')} 
-                                                className="hover:underline cursor-pointer"
-                                            >
-                                                Products
-                                            </span>
-                                            <ChevronRight size={12} className="text-border" />
-                                            <span 
                                                 onClick={() => navigate(`/dashboard/tenants/${product?.id || 'ems'}`)} 
                                                 className="hover:underline cursor-pointer"
                                             >
-                                                {product?.name || 'Product'}
+                                                Tenants
                                             </span>
                                             <ChevronRight size={12} className="text-border" />
                                             <span className="text-primary font-semibold">{tenant.companyName}</span>
@@ -506,6 +1251,14 @@ export default function TenantDetailsPage() {
 
                                 {/* Header Action Toolbar */}
                                 <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                                    {/* Common Edit Tenant Option */}
+                                    <button
+                                        onClick={handleOpenEditModal}
+                                        className="px-4 py-2 text-xs font-bold rounded-xl bg-primary text-primary-foreground hover:bg-accent hover:text-accent-foreground transition-all flex items-center gap-1.5 shadow-md cursor-pointer"
+                                    >
+                                        <Edit3 size={14} />
+                                        <span>Edit Tenant</span>
+                                    </button>
                                     {/* Activate / Deactivate */}
                                     <button
                                         onClick={handleToggleActive}
@@ -649,176 +1402,149 @@ export default function TenantDetailsPage() {
 
                                 {/* Company Information Card */}
                                 <div className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl p-6 space-y-5 shadow-sm lg:col-span-1">
-                                    <div className="flex items-center gap-2.5 pb-3 border-b border-border">
-                                        <div className="w-8 h-8 rounded-xl bg-accent/10 text-accent flex items-center justify-center">
-                                            <Building2 size={16} />
-                                        </div>
-                                        <div>
-                                            <h3 className="text-sm font-bold text-primary uppercase tracking-wider">Company Information</h3>
-                                            <p className="text-[11px] text-muted-foreground">General tenant profile details</p>
+                                    <div className="flex items-center justify-between pb-3 border-b border-border">
+                                        <div className="flex items-center gap-2.5">
+                                            <div className="w-8 h-8 rounded-xl bg-accent/10 text-accent flex items-center justify-center">
+                                                <Building2 size={16} />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-sm font-bold text-primary uppercase tracking-wider">Company Information</h3>
+                                                <p className="text-[11px] text-muted-foreground">General tenant profile details</p>
+                                            </div>
                                         </div>
                                     </div>
 
                                     <div className="space-y-4 text-xs">
                                         <div>
                                             <span className="text-muted-foreground font-medium block mb-1">Company Name</span>
-                                            <div className="font-bold text-primary text-sm">{tenant.companyName}</div>
-                                        </div>
-
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <span className="text-muted-foreground font-medium block mb-1">Domain</span>
-                                                <div className="font-mono text-primary font-semibold">{tenant.domain}</div>
-                                            </div>
-                                            <div>
-                                                <span className="text-muted-foreground font-medium block mb-1">Industry</span>
-                                                <div className="font-semibold text-primary">{tenant.industry}</div>
+                                            <div className="font-bold text-primary text-sm flex items-center gap-2">
+                                                <Building2 size={14} className="text-accent shrink-0" />
+                                                <span>{tenant.companyName}</span>
                                             </div>
                                         </div>
 
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <span className="text-muted-foreground font-medium block mb-1">Region</span>
-                                                <div className="font-semibold text-primary">{tenant.region}</div>
-                                            </div>
-                                            <div>
-                                                <span className="text-muted-foreground font-medium block mb-1">Tax ID</span>
-                                                <div className="font-mono text-primary font-semibold">{tenant.taxId}</div>
+                                        <div>
+                                            <span className="text-muted-foreground font-medium block mb-1">Domain</span>
+                                            <div className="font-mono text-primary font-semibold flex items-center gap-2">
+                                                <Globe size={13} className="text-accent shrink-0" />
+                                                <span>{tenant.domain}</span>
                                             </div>
                                         </div>
 
                                         <div>
                                             <span className="text-muted-foreground font-medium block mb-1">Office Address</span>
-                                            <div className="text-primary font-medium">{tenant.address}, {tenant.city}, {tenant.country}</div>
+                                            <div className="text-primary font-medium flex items-start gap-2">
+                                                <MapPin size={14} className="text-accent shrink-0 mt-0.5" />
+                                                <span>{tenant.address}</span>
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <span className="text-muted-foreground font-medium block mb-1">Contact Number</span>
+                                            <div className="font-mono text-primary font-semibold flex items-center gap-2">
+                                                <Phone size={13} className="text-accent shrink-0" />
+                                                <span>{tenant.adminPhone || 'N/A'}</span>
+                                            </div>
                                         </div>
 
                                         <div>
                                             <span className="text-muted-foreground font-medium block mb-1">Primary Admin</span>
-                                            <div className="font-bold text-primary">{tenant.adminName}</div>
-                                            <div className="text-muted-foreground font-mono">{tenant.adminEmail}</div>
+                                            <div className="font-bold text-primary flex items-center gap-2">
+                                                <User size={14} className="text-accent shrink-0" />
+                                                <span>{tenant.adminName}</span>
+                                            </div>
+                                            <div className="text-muted-foreground font-mono flex items-center gap-2 mt-1 pl-5">
+                                                <Mail size={12} className="text-muted-foreground shrink-0" />
+                                                <span>{tenant.adminEmail}</span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* Subscription & Capacity Controls Card */}
+                                {/* Subscription & Capacity Controls Card (Read-Only Display) */}
                                 <div className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl p-6 space-y-6 shadow-sm lg:col-span-2">
-                                    <div className="flex items-center justify-between pb-3 border-b border-border">
+                                    <div className="flex items-center justify-between pb-4 border-b border-border">
                                         <div className="flex items-center gap-2.5">
                                             <div className="w-8 h-8 rounded-xl bg-accent/10 text-accent flex items-center justify-center">
                                                 <Calendar size={16} />
                                             </div>
                                             <div>
                                                 <h3 className="text-sm font-bold text-primary uppercase tracking-wider">Subscription & User Limits</h3>
-                                                <p className="text-[11px] text-muted-foreground">Modify dates, user capacity, and subscription plan</p>
+                                                <p className="text-[11px] text-muted-foreground">Current plan tier, license duration, and capacity limit</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Subscription Overview Grid */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div className="p-4 rounded-xl border border-border bg-slate-50/50 space-y-1">
+                                            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">Subscription Start Date</span>
+                                            <div className="font-mono text-sm font-extrabold text-primary flex items-center gap-2">
+                                                <Calendar size={14} className="text-accent shrink-0" />
+                                                <span>{tenant.startDate}</span>
                                             </div>
                                         </div>
 
-                                        {/* Quick Extension Buttons */}
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                onClick={() => handleExtendSubscription(30)}
-                                                className="px-3 py-1.5 bg-accent/10 text-accent border border-accent/20 rounded-lg text-xs font-bold hover:bg-accent/20 transition-colors flex items-center gap-1"
-                                            >
-                                                <RefreshCw size={12} />
-                                                <span>+30 Days</span>
-                                            </button>
-                                            <button
-                                                onClick={() => handleExtendSubscription(365)}
-                                                className="px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-bold hover:bg-accent hover:text-accent-foreground transition-all flex items-center gap-1"
-                                            >
-                                                <Zap size={12} />
-                                                <span>+1 Year</span>
-                                            </button>
+                                        <div className="p-4 rounded-xl border border-border bg-slate-50/50 space-y-1">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">Subscription Expiry Date</span>
+                                                {(() => {
+                                                    const rem = getDaysRemaining(tenant.expiryDate);
+                                                    return (
+                                                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border ${rem.colorClass}`}>
+                                                            {rem.text}
+                                                        </span>
+                                                    );
+                                                })()}
+                                            </div>
+                                            <div className="font-mono text-sm font-extrabold text-primary flex items-center gap-2 pt-0.5">
+                                                <Clock size={14} className="text-emerald-600 shrink-0" />
+                                                <span>{tenant.expiryDate}</span>
+                                            </div>
                                         </div>
                                     </div>
 
-                                    {/* Subscription Dates Form */}
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1.5">
-                                                Subscription Start Date
-                                            </label>
-                                            <input
-                                                type="date"
-                                                value={tenant.startDate}
-                                                onChange={(e) => {
-                                                    setTenant((prev) => ({ ...prev, startDate: e.target.value }));
-                                                    addAuditLog(`Updated start date to ${e.target.value}`, 'Subscription');
-                                                }}
-                                                className="w-full px-4 py-2.5 bg-background border border-input rounded-xl text-xs font-medium text-primary focus:outline-none focus:border-accent"
-                                            />
+                                    {/* User Seats Capacity Display */}
+                                    <div className="p-4 rounded-xl border border-border bg-slate-50/50 space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Maximum User Seat Capacity</span>
+                                            <span className="text-xs font-bold text-accent">{tenant.maxUsers} Managed Seats</span>
                                         </div>
-
-                                        <div>
-                                            <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1.5">
-                                                Subscription Expiry Date
-                                            </label>
-                                            <input
-                                                type="date"
-                                                value={tenant.expiryDate}
-                                                onChange={(e) => {
-                                                    setTenant((prev) => ({ ...prev, expiryDate: e.target.value }));
-                                                    addAuditLog(`Updated expiry date to ${e.target.value}`, 'Subscription');
-                                                }}
-                                                className="w-full px-4 py-2.5 bg-background border border-input rounded-xl text-xs font-medium text-primary focus:outline-none focus:border-accent"
-                                            />
+                                        <div className="flex items-baseline gap-2">
+                                            <span className="text-2xl font-extrabold text-primary">{tenant.maxUsers}</span>
+                                            <span className="text-xs text-muted-foreground font-medium">total allowed users ({tenant.activeUsersCount} currently active)</span>
                                         </div>
                                     </div>
 
-                                    {/* Maximum Users Limit */}
-                                    <div className="pt-2">
-                                        <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1.5">
-                                            Maximum User Limit
-                                        </label>
-                                        <div className="flex items-center gap-4">
-                                            <input
-                                                type="number"
-                                                min="1"
-                                                max="10000"
-                                                value={tenant.maxUsers}
-                                                onChange={(e) => {
-                                                    const val = Number(e.target.value);
-                                                    setTenant((prev) => ({ ...prev, maxUsers: val }));
-                                                    addAuditLog(`Updated maximum user capacity to ${val}`, 'Admin');
-                                                }}
-                                                className="w-full sm:w-48 px-4 py-2.5 bg-background border border-input rounded-xl text-xs font-medium text-primary focus:outline-none focus:border-accent"
-                                            />
-                                            <span className="text-xs text-muted-foreground font-medium">
-                                                Currently using <strong className="text-primary">{tenant.activeUsersCount}</strong> seats
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                    {/* Plan Selection (Upgrade / Downgrade) */}
-                                    <div className="pt-4 border-t border-border space-y-3">
-                                        <label className="block text-xs font-semibold text-primary uppercase tracking-wider">
-                                            Select Subscription Tier (Upgrade / Downgrade)
-                                        </label>
+                                    {/* Selected Subscription Plan Tier Display */}
+                                    <div className="pt-2 space-y-3">
+                                        <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">Active License Plan Tier</span>
                                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                             {[
                                                 { id: 'Standard', desc: 'Core endpoint management & basic reporting' },
                                                 { id: 'Professional', desc: 'Advanced automation, SLAs, & 24/7 support' },
                                                 { id: 'Enterprise', desc: 'Full suite, unlimited logs, AI, & dedicated TAM' },
-                                            ].map((plan) => (
-                                                <button
-                                                    key={plan.id}
-                                                    type="button"
-                                                    onClick={() => handlePlanChange(plan.id as any)}
-                                                    className={`p-4 rounded-xl border text-left transition-all relative ${
-                                                        tenant.plan === plan.id
-                                                            ? 'border-accent bg-accent/10 shadow-sm'
-                                                            : 'border-input hover:border-accent/40 bg-background'
-                                                    }`}
-                                                >
-                                                    {tenant.plan === plan.id && (
-                                                        <span className="absolute top-3 right-3 text-accent">
-                                                            <CheckCircle2 size={16} />
-                                                        </span>
-                                                    )}
-                                                    <div className="font-bold text-primary text-sm">{plan.id}</div>
-                                                    <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{plan.desc}</p>
-                                                </button>
-                                            ))}
+                                            ].map((plan) => {
+                                                const isCurrent = tenant.plan === plan.id;
+                                                return (
+                                                    <div
+                                                        key={plan.id}
+                                                        className={`p-4 rounded-xl border transition-all relative ${
+                                                            isCurrent
+                                                                ? 'border-accent bg-accent/10 shadow-sm'
+                                                                : 'border-border/60 bg-background opacity-60'
+                                                        }`}
+                                                    >
+                                                        {isCurrent && (
+                                                            <span className="absolute top-3 right-3 text-accent">
+                                                                <CheckCircle2 size={16} />
+                                                            </span>
+                                                        )}
+                                                        <div className="font-bold text-primary text-sm">{plan.id}</div>
+                                                        <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{plan.desc}</p>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 </div>
@@ -916,8 +1642,8 @@ export default function TenantDetailsPage() {
                                         <div className="pt-2">
                                             <button
                                                 type="button"
-                                                onClick={() => { setIsPasswordModalOpen(true); handleGenerateNewPassword(); }}
-                                                className="w-full py-2.5 bg-primary text-primary-foreground font-bold rounded-xl hover:bg-accent hover:text-accent-foreground transition-all flex items-center justify-center gap-2"
+                                                onClick={handleOpenResetPasswordModal}
+                                                className="w-full py-2.5 bg-primary text-primary-foreground font-bold rounded-xl hover:bg-accent hover:text-accent-foreground transition-all flex items-center justify-center gap-2 cursor-pointer"
                                             >
                                                 <Key size={14} />
                                                 <span>Reset & Issue New Admin Password</span>
@@ -973,91 +1699,145 @@ export default function TenantDetailsPage() {
 
                         {/* TAB 4: SYSTEM-LEVEL AUDIT LOGS */}
                         {activeTab === 'audit' && (
-                            <motion.div variants={fadeUp} className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl p-6 space-y-5 shadow-sm">
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
-                                    <div>
-                                        <h3 className="text-base font-bold text-primary">System-Level Audit Logs</h3>
-                                        <p className="text-xs text-muted-foreground mt-0.5">
-                                            Immutable record of security events, administrative changes, and status updates for {tenant.companyName}.
-                                        </p>
-                                    </div>
-
-                                    {/* Search & Category Filter */}
-                                    <div className="flex flex-wrap items-center gap-3">
-                                        <div className="relative w-full sm:w-64">
-                                            <input
-                                                type="text"
-                                                placeholder="Search audit log..."
-                                                value={logSearch}
-                                                onChange={(e) => setLogSearch(e.target.value)}
-                                                className="w-full px-3.5 py-2 pl-9 bg-background border border-input rounded-xl text-xs font-medium text-primary focus:outline-none focus:border-accent"
-                                            />
-                                            <Search size={14} className="absolute left-3 top-2.5 text-muted-foreground" />
+                            <motion.div variants={fadeUp} className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl shadow-sm overflow-hidden flex flex-col justify-between">
+                                <div className="p-6 space-y-5">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
+                                        <div>
+                                            <h3 className="text-base font-bold text-primary">System-Level Audit Logs</h3>
+                                            <p className="text-xs text-muted-foreground mt-0.5">
+                                                Immutable record of security events, administrative changes, and status updates for {tenant.companyName}.
+                                            </p>
                                         </div>
 
-                                        <AuditCategorySelect
-                                            value={logCategoryFilter}
-                                            onChange={setLogCategoryFilter}
-                                        />
+                                        {/* Search & Category Filter */}
+                                        <div className="flex flex-wrap items-center gap-3">
+                                            <div className="relative w-full sm:w-64">
+                                                <input
+                                                    type="text"
+                                                    placeholder="Search audit log..."
+                                                    value={logSearch}
+                                                    onChange={(e) => setLogSearch(e.target.value)}
+                                                    className="w-full px-3.5 py-2 pl-9 bg-background border border-input rounded-xl text-xs font-medium text-primary focus:outline-none focus:border-accent"
+                                                />
+                                                <Search size={14} className="absolute left-3 top-2.5 text-muted-foreground" />
+                                            </div>
+
+                                            <AuditCategorySelect
+                                                value={logCategoryFilter}
+                                                onChange={setLogCategoryFilter}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Audit Log Table */}
+                                    <div className="overflow-x-auto min-h-[280px]">
+                                        <table className="w-full text-left border-collapse text-xs">
+                                            <thead>
+                                                <tr className="border-b border-border bg-muted/30 text-muted-foreground font-semibold uppercase tracking-wider text-[11px]">
+                                                    <th className="py-3 px-4">Timestamp</th>
+                                                    <th className="py-3 px-4">Category</th>
+                                                    <th className="py-3 px-4">Action Performed</th>
+                                                    <th className="py-3 px-4">Actor</th>
+                                                    <th className="py-3 px-4">IP Address</th>
+                                                    <th className="py-3 px-4 text-center">Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-border/60">
+                                                {filteredLogs.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={6} className="py-10 text-center text-muted-foreground font-medium">
+                                                            No audit logs found matching query.
+                                                        </td>
+                                                    </tr>
+                                                ) : (
+                                                    paginatedLogs.map((log) => (
+                                                        <tr key={log.id} className="hover:bg-muted/30 transition-colors">
+                                                            <td className="py-3 px-4 font-mono text-muted-foreground text-[11px]">
+                                                                {log.timestamp}
+                                                            </td>
+                                                            <td className="py-3 px-4 font-bold">
+                                                                <span className="px-2 py-0.5 rounded text-[10px] uppercase bg-accent/10 text-accent">
+                                                                    {log.category}
+                                                                </span>
+                                                            </td>
+                                                            <td className="py-3 px-4 font-medium text-primary">
+                                                                {log.action}
+                                                            </td>
+                                                            <td className="py-3 px-4 font-mono text-muted-foreground">
+                                                                {log.actor}
+                                                            </td>
+                                                            <td className="py-3 px-4 font-mono text-muted-foreground text-[11px]">
+                                                                {log.ipAddress}
+                                                            </td>
+                                                            <td className="py-3 px-4 text-center">
+                                                                <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                                                    log.status === 'Success'
+                                                                        ? 'bg-emerald-500/10 text-emerald-600'
+                                                                        : log.status === 'Warning'
+                                                                        ? 'bg-amber-500/10 text-amber-600'
+                                                                        : 'bg-rose-500/10 text-rose-600'
+                                                                }`}>
+                                                                    {log.status}
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+                                                    ))
+                                                )}
+                                            </tbody>
+                                        </table>
                                     </div>
                                 </div>
 
-                                {/* Audit Log Table */}
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-left border-collapse text-xs">
-                                        <thead>
-                                            <tr className="border-b border-border bg-muted/30 text-muted-foreground font-semibold uppercase tracking-wider text-[11px]">
-                                                <th className="py-3 px-4">Timestamp</th>
-                                                <th className="py-3 px-4">Category</th>
-                                                <th className="py-3 px-4">Action Performed</th>
-                                                <th className="py-3 px-4">Actor</th>
-                                                <th className="py-3 px-4">IP Address</th>
-                                                <th className="py-3 px-4 text-center">Status</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-border/60">
-                                            {filteredLogs.length === 0 ? (
-                                                <tr>
-                                                    <td colSpan={6} className="py-10 text-center text-muted-foreground font-medium">
-                                                        No audit logs found matching query.
-                                                    </td>
-                                                </tr>
-                                            ) : (
-                                                filteredLogs.map((log) => (
-                                                    <tr key={log.id} className="hover:bg-muted/30 transition-colors">
-                                                        <td className="py-3 px-4 font-mono text-muted-foreground text-[11px]">
-                                                            {log.timestamp}
-                                                        </td>
-                                                        <td className="py-3 px-4 font-bold">
-                                                            <span className="px-2 py-0.5 rounded text-[10px] uppercase bg-accent/10 text-accent">
-                                                                {log.category}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-3 px-4 font-medium text-primary">
-                                                            {log.action}
-                                                        </td>
-                                                        <td className="py-3 px-4 font-mono text-muted-foreground">
-                                                            {log.actor}
-                                                        </td>
-                                                        <td className="py-3 px-4 font-mono text-muted-foreground text-[11px]">
-                                                            {log.ipAddress}
-                                                        </td>
-                                                        <td className="py-3 px-4 text-center">
-                                                            <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                                                log.status === 'Success'
-                                                                    ? 'bg-emerald-500/10 text-emerald-600'
-                                                                    : log.status === 'Warning'
-                                                                    ? 'bg-amber-500/10 text-amber-600'
-                                                                    : 'bg-rose-500/10 text-rose-600'
-                                                            }`}>
-                                                                {log.status}
-                                                            </span>
-                                                        </td>
-                                                    </tr>
-                                                ))
-                                            )}
-                                        </tbody>
-                                    </table>
+                                {/* Footer Pagination Bar */}
+                                <div className="p-4 bg-slate-50/80 border-t border-border/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs select-none">
+                                    <div className="text-muted-foreground font-medium">
+                                        Showing{' '}
+                                        <span className="font-bold text-primary">
+                                            {filteredLogs.length === 0 ? 0 : logStartIndex + 1}
+                                        </span>{' '}
+                                        to{' '}
+                                        <span className="font-bold text-primary">
+                                            {Math.min(logEndIndex, filteredLogs.length)}
+                                        </span>{' '}
+                                        of <span className="font-bold text-primary">{filteredLogs.length}</span> entries
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                        <button
+                                            type="button"
+                                            disabled={logPage === 1}
+                                            onClick={() => setLogPage((prev) => Math.max(prev - 1, 1))}
+                                            className="h-8 w-8 flex justify-center items-center rounded-xl border border-input bg-background font-semibold text-primary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-all flex items-center gap-1 cursor-pointer"
+                                        >
+                                            <ChevronLeft size={14} />
+                                        </button>
+
+                                        <div className="flex items-center gap-1">
+                                            {Array.from({ length: totalLogPages }, (_, i) => i + 1).map((pageNum) => (
+                                                <button
+                                                    key={pageNum}
+                                                    type="button"
+                                                    onClick={() => setLogPage(pageNum)}
+                                                    className={`h-8 w-8 rounded-xl font-bold transition-all cursor-pointer ${
+                                                        logPage === pageNum
+                                                            ? 'bg-primary text-primary-foreground shadow-sm'
+                                                            : 'bg-background border border-input text-primary hover:bg-slate-100'
+                                                    }`}
+                                                >
+                                                    {pageNum}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            disabled={logPage === totalLogPages || filteredLogs.length === 0}
+                                            onClick={() => setLogPage((prev) => Math.min(prev + 1, totalLogPages))}
+                                            className="h-8 w-8 flex justify-center items-center rounded-xl border border-input bg-background font-semibold text-primary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-all flex items-center gap-1 cursor-pointer"
+                                        >
+                                            <ChevronRight size={14} />
+                                        </button>
+                                    </div>
                                 </div>
                             </motion.div>
                         )}
@@ -1080,39 +1860,87 @@ export default function TenantDetailsPage() {
                                 </h3>
                                 <button
                                     onClick={() => setIsPasswordModalOpen(false)}
-                                    className="p-1 text-muted-foreground hover:text-primary rounded-lg transition-colors"
+                                    className="p-1 text-muted-foreground hover:text-primary bg-slate-100 rounded-full transition-colors cursor-pointer"
                                 >
-                                    <XCircle size={18} />
+                                    <X size={18} />
                                 </button>
                             </div>
 
                             <p className="text-xs text-muted-foreground leading-relaxed">
-                                Generated temporary password for admin <strong className="text-primary">{tenant.adminEmail}</strong>:
+                                Set password for admin <strong className="text-primary">{tenant.adminEmail}</strong>. An auto-generated password is populated by default, or you can type your own custom password below:
                             </p>
 
-                            <div className="flex items-center gap-2 p-3 bg-muted rounded-xl border border-input font-mono text-sm font-bold text-primary">
-                                <span className="flex-1 select-all">{newPassword}</span>
+                            {/* Editable Password Input Box */}
+                            <div className="space-y-2">
+                                <label className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                                    Admin Password
+                                </label>
+                                <div className="flex items-center gap-2">
+                                    <div className="relative flex-1">
+                                        <input
+                                            type={showPassword ? 'text' : 'password'}
+                                            value={newPassword}
+                                            onChange={(e) => {
+                                                setNewPassword(e.target.value);
+                                                setPasswordCopied(false);
+                                            }}
+                                            placeholder="Type custom password..."
+                                            className="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-input rounded-xl font-mono text-sm font-bold text-primary focus:outline-none focus:border-accent focus:bg-background transition-all"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowPassword((s) => !s)}
+                                            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-primary bg-slate-100 rounded-full transition-colors cursor-pointer"
+                                            title={showPassword ? 'Hide password' : 'Show password'}
+                                        >
+                                            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                        </button>
+                                    </div>
+
+                                    {/* Copy Button */}
+                                    <button
+                                        type="button"
+                                        onClick={handleCopyPassword}
+                                        className="px-3 py-2.5 bg-primary text-primary-foreground text-xs font-bold rounded-xl hover:bg-accent hover:text-accent-foreground transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                                        title="Copy password"
+                                    >
+                                        {passwordCopied ? <Check size={14} /> : <Copy size={14} />}
+                                        <span>{passwordCopied ? 'Copied!' : 'Copy'}</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Auto Generate Helper */}
+                            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-border/60 text-xs">
+                                <div className="flex items-center gap-2 text-muted-foreground">
+                                    <Zap size={14} className="text-accent shrink-0" />
+                                    <span>Need a new random password?</span>
+                                </div>
                                 <button
-                                    onClick={handleCopyPassword}
-                                    className="px-3 py-1.5 bg-primary text-primary-foreground text-xs font-bold rounded-lg hover:bg-accent hover:text-accent-foreground transition-all flex items-center gap-1.5 shrink-0"
+                                    type="button"
+                                    onClick={handleGenerateNewPassword}
+                                    className="px-3 py-1.5 bg-background border border-input text-xs font-bold text-primary rounded-lg hover:border-accent hover:text-accent transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
                                 >
-                                    {passwordCopied ? <Check size={14} /> : <Copy size={14} />}
-                                    <span>{passwordCopied ? 'Copied!' : 'Copy'}</span>
+                                    <RefreshCw size={13} />
+                                    <span>Auto Generate</span>
                                 </button>
                             </div>
 
+                            {/* Footer Action Buttons */}
                             <div className="flex items-center justify-end gap-3 pt-3 border-t border-border">
                                 <button
-                                    onClick={() => handleGenerateNewPassword()}
-                                    className="px-4 py-2 border border-input text-xs font-semibold rounded-xl text-primary hover:bg-muted"
+                                    type="button"
+                                    onClick={() => setIsPasswordModalOpen(false)}
+                                    className="px-4 py-2 border border-input text-xs font-semibold rounded-xl text-primary hover:bg-slate-100 transition-colors cursor-pointer"
                                 >
-                                    Re-generate
+                                    Cancel
                                 </button>
                                 <button
-                                    onClick={() => setIsPasswordModalOpen(false)}
-                                    className="px-5 py-2 bg-primary text-primary-foreground text-xs font-bold rounded-xl hover:bg-accent hover:text-accent-foreground transition-all"
+                                    type="button"
+                                    onClick={handleSavePassword}
+                                    className="px-5 py-2 bg-primary text-primary-foreground text-xs font-bold rounded-xl hover:bg-accent hover:text-accent-foreground transition-all cursor-pointer"
                                 >
-                                    Done
+                                    Save Password
                                 </button>
                             </div>
                         </motion.div>
@@ -1134,9 +1962,9 @@ export default function TenantDetailsPage() {
                                 </h3>
                                 <button
                                     onClick={() => setIsSuspendModalOpen(false)}
-                                    className="p-1 text-muted-foreground hover:text-primary rounded-lg transition-colors"
+                                    className="p-1 text-muted-foreground hover:text-primary bg-slate-100 rounded-full transition-colors cursor-pointer"
                                 >
-                                    <XCircle size={18} />
+                                    <X size={18} />
                                 </button>
                             </div>
 
@@ -1168,6 +1996,640 @@ export default function TenantDetailsPage() {
                                     Confirm Suspension
                                 </button>
                             </div>
+                        </motion.div>
+                    </div>
+                )}
+
+                {/* EDIT TENANT DETAILS MODAL (3-STEP WIZARD FLOW) */}
+                {isEditModalOpen && (
+                    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            className={`bg-background border border-border rounded-2xl shadow-2xl ${showEditSuccessCard ? 'max-w-md' : 'max-w-2xl'} w-full p-6 lg:p-8 space-y-6 my-8 overflow-visible relative`}
+                        >
+                            {showEditSuccessCard ? (
+                                <div className="text-center py-4 space-y-6 animate-in fade-in zoom-in-95 duration-200">
+                                    <div className="w-16 h-16 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/10">
+                                        <CheckCircle2 size={36} />
+                                    </div>
+
+                                    <div className="space-y-1">
+                                        <h3 className="text-2xl font-bold text-primary">Tenant Details Updated!</h3>
+                                        <p className="text-xs text-muted-foreground">
+                                            Organization profile, subscription parameters, and admin credentials for <strong className="text-primary">{editName}</strong> have been updated successfully.
+                                        </p>
+                                    </div>
+
+                                    <div className="pt-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowEditSuccessCard(false);
+                                                setIsEditModalOpen(false);
+                                                setEditStep(1);
+                                            }}
+                                            className="w-full py-3 bg-primary text-primary-foreground text-xs font-bold rounded-xl hover:bg-accent hover:text-accent-foreground transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                                        >
+                                            <Check size={16} />
+                                            <span>Done & Close</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    {/* Modal Header */}
+                                    <div className="flex items-center justify-between pb-4 border-b border-border">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-accent/10 text-accent flex items-center justify-center border border-accent/20">
+                                        <Edit3 size={20} />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-bold text-primary">
+                                            Edit Tenant Details
+                                        </h3>
+                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                            Update company profile, subscription plan details, and administrator credentials
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setIsEditModalOpen(false);
+                                        setEditStep(1);
+                                    }}
+                                    className="p-1 text-muted-foreground hover:text-primary bg-slate-100 rounded-full transition-colors cursor-pointer"
+                                >
+                                    <X size={18} />
+                                </button>
+                            </div>
+
+                            {/* 3-Step Wizard Stepper Bar */}
+                            <div className="flex items-center justify-between pb-3 border-b border-border/80 text-xs font-semibold select-none">
+                                <button
+                                    type="button"
+                                    onClick={() => setEditStep(1)}
+                                    className={`flex items-center gap-2.5 text-left transition-all ${
+                                        editStep === 1 ? 'text-accent font-bold cursor-pointer' : 'text-muted-foreground font-medium hover:text-primary cursor-pointer'
+                                    }`}
+                                >
+                                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                                        editStep === 1 ? 'bg-accent text-white shadow-md' : 'bg-slate-200 text-slate-700'
+                                    }`}>
+                                        1
+                                    </div>
+                                    <div>
+                                        <div className="text-xs font-bold uppercase tracking-wider">Step 1</div>
+                                        <div className="text-[11px] text-muted-foreground">Company Info</div>
+                                    </div>
+                                </button>
+
+                                <div className="flex-1 max-w-[60px] mx-2 flex items-center gap-1">
+                                    <div className={`h-0.5 w-full rounded-full transition-all ${editStep >= 2 ? 'bg-accent' : 'bg-slate-200'}`} />
+                                    <ChevronRight size={14} className={editStep >= 2 ? 'text-accent' : 'text-slate-400'} />
+                                </div>
+
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (editName.trim() && editAddress.trim() && editDomain.trim() && editPhone.trim()) {
+                                            handleGoToStep2();
+                                        }
+                                    }}
+                                    className={`flex items-center gap-2.5 text-left transition-all ${
+                                        editStep === 2 ? 'text-accent font-bold cursor-pointer' : 'text-muted-foreground font-medium hover:text-primary cursor-pointer'
+                                    }`}
+                                >
+                                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                                        editStep === 2 ? 'bg-accent text-white shadow-md' : 'bg-slate-200 text-slate-700'
+                                    }`}>
+                                        2
+                                    </div>
+                                    <div>
+                                        <div className="text-xs font-bold uppercase tracking-wider">Step 2</div>
+                                        <div className="text-[11px] text-muted-foreground">Plan Details</div>
+                                    </div>
+                                </button>
+
+                                <div className="flex-1 max-w-[60px] mx-2 flex items-center gap-1">
+                                    <div className={`h-0.5 w-full rounded-full transition-all ${editStep === 3 ? 'bg-accent' : 'bg-slate-200'}`} />
+                                    <ChevronRight size={14} className={editStep === 3 ? 'text-accent' : 'text-slate-400'} />
+                                </div>
+
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (editName.trim() && editAddress.trim() && editDomain.trim() && editPhone.trim()) {
+                                            handleGoToStep3();
+                                        }
+                                    }}
+                                    className={`flex items-center gap-2.5 text-left transition-all ${
+                                        editStep === 3 ? 'text-accent font-bold cursor-pointer' : 'text-muted-foreground font-medium hover:text-primary cursor-pointer'
+                                    }`}
+                                >
+                                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                                        editStep === 3 ? 'bg-accent text-white shadow-md' : 'bg-slate-200 text-slate-700'
+                                    }`}>
+                                        3
+                                    </div>
+                                    <div>
+                                        <div className="text-xs font-bold uppercase tracking-wider">Step 3</div>
+                                        <div className="text-[11px] text-muted-foreground">Admin Details</div>
+                                    </div>
+                                </button>
+                            </div>
+
+                            <form onSubmit={handleSaveEditTenant} className="space-y-6 text-xs max-h-[75vh] overflow-y-auto pr-1 slim-scrollbar-x">
+                                {/* ── STEP 1: COMPANY INFORMATION ── */}
+                                {editStep === 1 && (
+                                    <div className="bg-slate-50/60 border border-border/70 rounded-xl p-4 space-y-4 animate-in fade-in duration-150">
+                                        <div className="flex items-center gap-2 pb-2 border-b border-border/60">
+                                            <div className="p-1.5 rounded-lg bg-accent/10 text-accent">
+                                                <Building2 size={16} />
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Tenant Name <span className="text-red-500">*</span>
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    required
+                                                    placeholder="e.g. Nexus Global Tech"
+                                                    value={editName}
+                                                    onChange={(e) => setEditName(e.target.value)}
+                                                    className="w-full px-4 py-2.5 bg-background border border-input rounded-xl font-medium text-primary focus:outline-none focus:border-accent"
+                                                />
+                                            </div>
+
+                                            <div>
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Tenant ID (Auto-Generated)
+                                                </label>
+                                                <div className="px-4 py-2.5 bg-slate-100/90 border border-input/80 rounded-xl font-mono text-xs font-extrabold text-accent flex items-center justify-between select-none cursor-not-allowed">
+                                                    <span>{formatTenantId(tenant.id)}</span>
+                                                    <span className="text-[10px] text-muted-foreground font-sans font-semibold bg-background px-2 py-0.5 rounded border border-border">Read-Only</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                Tenant Address <span className="text-red-500">*</span>
+                                            </label>
+                                            <input
+                                                type="text"
+                                                required
+                                                placeholder="e.g. 100 Innovation Way, Suite 400"
+                                                value={editAddress}
+                                                onChange={(e) => setEditAddress(e.target.value)}
+                                                className="w-full px-4 py-2.5 bg-background border border-input rounded-xl font-medium text-primary focus:outline-none focus:border-accent"
+                                            />
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Primary Domain <span className="text-red-500">*</span>
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    required
+                                                    placeholder="e.g. nexusglobal.com"
+                                                    value={editDomain}
+                                                    onChange={(e) => setEditDomain(e.target.value)}
+                                                    className="w-full px-4 py-2.5 bg-background border border-input rounded-xl font-medium text-primary focus:outline-none focus:border-accent"
+                                                />
+                                            </div>
+
+                                            <div>
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Mobile Number <span className="text-red-500">*</span>
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    required
+                                                    placeholder="e.g. 9876543210"
+                                                    value={editPhone}
+                                                    onChange={(e) => setEditPhone(e.target.value.replace(/\D/g, ''))}
+                                                    className="w-full px-4 py-2.5 bg-background border border-input rounded-xl font-medium text-primary focus:outline-none focus:border-accent"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* ── STEP 2: PLAN & SUBSCRIPTION DETAILS ── */}
+                                {editStep === 2 && (
+                                    <div className="bg-slate-50/60 border border-border/70 rounded-xl p-4 space-y-4 animate-in fade-in duration-150">
+                                        <div className="flex items-center gap-2 pb-2 border-b border-border/60">
+                                            <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-600">
+                                                <CreditCard size={16} />
+                                            </div>
+                                            <div>
+                                                <h4 className="text-xs font-bold text-primary uppercase tracking-wider">Step 2: Plan & Subscription Details</h4>
+                                                <p className="text-[11px] text-muted-foreground">Product platforms, license key, billing plan tier, and user capacity</p>
+                                            </div>
+                                        </div>
+
+                                        {/* License Key (16-Digit Auto-Generated) */}
+                                        <div>
+                                            <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                License Key (16-Digit Auto-Generated) <span className="text-red-500">*</span>
+                                            </label>
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-full px-4 py-2 bg-background border border-input rounded-xl font-mono text-xs font-extrabold text-primary flex items-center justify-between select-none">
+                                                    <div className="flex items-center gap-2">
+                                                        <Key size={14} className="text-accent" />
+                                                        <span>{formatLicenseKey(editLicenseKey)}</span>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleCopyEditLicenseKey}
+                                                    className="p-2.5 bg-background border border-input rounded-xl text-muted-foreground hover:text-accent hover:border-accent transition-colors cursor-pointer shrink-0"
+                                                    title="Copy License Key to Clipboard"
+                                                >
+                                                    {editCopiedLicenseKey ? <Check size={15} className="text-emerald-500" /> : <Copy size={15} />}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setEditLicenseKey(generateLicenseKey())}
+                                                    className="p-2.5 bg-background border border-input rounded-xl text-muted-foreground hover:text-accent hover:border-accent transition-colors cursor-pointer shrink-0"
+                                                    title="Generate New 16-Digit License Key"
+                                                >
+                                                    <RefreshCw size={15} />
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Row 2: Product Name & Status on SAME ROW */}
+                                        <div className={`grid grid-cols-2 gap-4 relative ${['product', 'status'].includes(editActiveOpenDropdown) ? 'z-[100]' : 'z-30'}`}>
+                                            {/* Product Name (Multiple Select Dropdown) */}
+                                            <div className={`relative ${editActiveOpenDropdown === 'product' ? 'z-[100]' : 'z-20'}`}>
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Product Name <span className="text-red-500">*</span>
+                                                </label>
+                                                <div className="relative">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const next = !isEditProductDropdownOpen;
+                                                            setIsEditProductDropdownOpen(next);
+                                                            setEditActiveOpenDropdown(next ? 'product' : 'none');
+                                                        }}
+                                                        className="w-full min-h-[42px] px-3.5 py-2 bg-background border border-input rounded-xl text-xs font-semibold text-primary focus:outline-none focus:border-accent hover:border-accent/60 transition-all flex items-center justify-between gap-2 shadow-sm cursor-pointer"
+                                                    >
+                                                        <div className="flex flex-wrap gap-1.5 min-w-0">
+                                                            {editSelectedProducts.length === 0 ? (
+                                                                <span className="text-muted-foreground font-normal">Select Products...</span>
+                                                            ) : (
+                                                                editSelectedProducts.map((p) => (
+                                                                    <span key={p} className="px-2 py-0.5 bg-accent/15 text-accent font-bold text-[11px] rounded-md flex items-center gap-1 border border-accent/20">
+                                                                        {p}
+                                                                    </span>
+                                                                ))
+                                                            )}
+                                                        </div>
+                                                        <ChevronDown size={14} className={`text-muted-foreground transition-transform duration-200 shrink-0 ${isEditProductDropdownOpen ? 'rotate-180 text-accent' : ''}`} />
+                                                    </button>
+
+                                                    {isEditProductDropdownOpen && (
+                                                        <>
+                                                            <div
+                                                                className="fixed inset-0 z-40"
+                                                                onClick={() => {
+                                                                    setIsEditProductDropdownOpen(false);
+                                                                    setEditActiveOpenDropdown('none');
+                                                                }}
+                                                            />
+                                                            <div className="absolute top-full mt-1.5 left-0 w-full bg-background border border-border/80 rounded-xl shadow-2xl z-50 p-2 space-y-1">
+                                                                {[
+                                                                    { id: 'EMS', name: 'Endpoint Management (EMS)' },
+                                                                    { id: 'TICKETS', name: 'Ticket & Asset Management' },
+                                                                    { id: 'PETTY CASH', name: 'Petty Cash Management' },
+                                                                    { id: 'DAYBOOK', name: 'Daybook Management' },
+                                                                ].map((product) => {
+                                                                    const isSelected = editSelectedProducts.includes(product.id);
+                                                                    return (
+                                                                        <button
+                                                                            key={product.id}
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                if (isSelected) {
+                                                                                    setEditSelectedProducts(editSelectedProducts.filter((item) => item !== product.id));
+                                                                                } else {
+                                                                                    setEditSelectedProducts([...editSelectedProducts, product.id]);
+                                                                                }
+                                                                            }}
+                                                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                                                                isSelected ? 'bg-accent/15 text-accent font-bold' : 'text-primary hover:bg-slate-100'
+                                                                            }`}
+                                                                        >
+                                                                            <div className="flex items-center gap-2">
+                                                                                <div className={`w-4 h-4 rounded border flex items-center justify-center ${isSelected ? 'bg-accent border-accent text-white' : 'border-input'}`}>
+                                                                                    {isSelected && <Check size={12} />}
+                                                                                </div>
+                                                                                <span>{product.name}</span>
+                                                                            </div>
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Status Dropdown */}
+                                            <div className="relative">
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Status <span className="text-red-500">*</span>
+                                                </label>
+                                                <CustomSelect
+                                                    value={editStatus}
+                                                    onChange={(val) => setEditStatus(val as any)}
+                                                    options={[
+                                                        { value: 'Active', label: 'Active' },
+                                                        { value: 'Pending', label: 'Pending' },
+                                                        { value: 'Inactive', label: 'Inactive' },
+                                                        { value: 'Suspended', label: 'Suspended' },
+                                                    ]}
+                                                    fullWidth
+                                                    openUp
+                                                    onOpenChange={(open) => setEditActiveOpenDropdown(open ? 'status' : 'none')}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {/* Row 3: Plan Type & Subscription Type */}
+                                        <div className={`grid grid-cols-2 gap-4 relative ${['plan', 'sub'].includes(editActiveOpenDropdown) ? 'z-[100]' : 'z-20'}`}>
+                                            <div className="relative">
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Plan Type <span className="text-red-500">*</span>
+                                                </label>
+                                                <CustomSelect
+                                                    value={editPlan}
+                                                    onChange={(val) => setEditPlan(val as any)}
+                                                    options={[
+                                                        { value: 'Enterprise', label: 'Enterprise' },
+                                                        { value: 'Professional', label: 'Professional' },
+                                                        { value: 'Standard', label: 'Standard' },
+                                                    ]}
+                                                    fullWidth
+                                                    openUp
+                                                    onOpenChange={(open) => setEditActiveOpenDropdown(open ? 'plan' : 'none')}
+                                                />
+                                            </div>
+
+                                            <div className="relative">
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Subscription Type <span className="text-red-500">*</span>
+                                                </label>
+                                                <CustomSelect
+                                                    value={editSubscriptionType}
+                                                    onChange={(val) => setEditSubscriptionType(val as any)}
+                                                    options={[
+                                                        { value: 'Annual Recurring', label: 'Annual Recurring' },
+                                                        { value: 'Monthly Billing', label: 'Monthly Billing' },
+                                                        { value: 'Perpetual License', label: 'Perpetual License' },
+                                                    ]}
+                                                    fullWidth
+                                                    openUp
+                                                    onOpenChange={(open) => setEditActiveOpenDropdown(open ? 'sub' : 'none')}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {/* Row 4: Max Users Count & Expiry Date */}
+                                        <div className="grid grid-cols-2 gap-4 relative z-10">
+                                            <div>
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Max Users Count <span className="text-red-500">*</span>
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    min={1}
+                                                    required
+                                                    placeholder="e.g. 100"
+                                                    value={editMaxUsers}
+                                                    onChange={(e) => setEditMaxUsers(e.target.value)}
+                                                    className="w-full px-4 py-2.5 bg-background border border-input rounded-xl font-medium text-primary focus:outline-none focus:border-accent"
+                                                />
+                                            </div>
+
+                                            <div>
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Subscription Expiry Date <span className="text-red-500">*</span>
+                                                </label>
+                                                <ModernDatePicker
+                                                    value={editExpiryDate}
+                                                    onChange={(val) => setEditExpiryDate(val)}
+                                                    placeholder="Select expiry date"
+                                                    openUp={false}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* ── STEP 3: ADMIN DETAILS ── */}
+                                {editStep === 3 && (
+                                    <div className="bg-slate-50/60 border border-border/70 rounded-xl p-4 space-y-4 animate-in fade-in duration-150">
+                                        <div className="flex items-center gap-2 pb-2 border-b border-border/60">
+                                            <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-600">
+                                                <User size={16} />
+                                            </div>
+                                            <div>
+                                                <h4 className="text-xs font-bold text-primary uppercase tracking-wider">Step 3: Admin Details</h4>
+                                                <p className="text-[11px] text-muted-foreground">Primary administrator credentials and contact information</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Admin Name <span className="text-red-500">*</span>
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    required
+                                                    placeholder="e.g. Alex Mercer"
+                                                    value={editAdminName}
+                                                    onChange={(e) => setEditAdminName(e.target.value)}
+                                                    className="w-full px-4 py-2.5 bg-background border border-input rounded-xl font-medium text-primary focus:outline-none focus:border-accent"
+                                                />
+                                            </div>
+
+                                            <div>
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Admin Email <span className="text-red-500">*</span>
+                                                </label>
+                                                <input
+                                                    type="email"
+                                                    required
+                                                    placeholder="admin@company.com"
+                                                    value={editAdminEmail}
+                                                    onChange={(e) => setEditAdminEmail(e.target.value)}
+                                                    className="w-full px-4 py-2.5 bg-background border border-input rounded-xl font-medium text-primary focus:outline-none focus:border-accent"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Password <span className="text-red-500">*</span>
+                                                </label>
+                                                <div className="relative">
+                                                    <input
+                                                        type={showEditAdminPassword ? 'text' : 'password'}
+                                                        required
+                                                        placeholder="Enter admin password"
+                                                        value={editAdminPassword}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value;
+                                                            setEditAdminPassword(val);
+                                                            if (editAdminConfirmPassword && val !== editAdminConfirmPassword) {
+                                                                setEditPasswordError('Passwords do not match');
+                                                            } else {
+                                                                setEditPasswordError(null);
+                                                            }
+                                                        }}
+                                                        className={`w-full pl-4 pr-10 py-2.5 bg-background border rounded-xl font-medium text-primary focus:outline-none transition-colors ${
+                                                            editPasswordError
+                                                                ? 'border-rose-500 text-rose-600 focus:border-rose-500'
+                                                                : 'border-input focus:border-accent'
+                                                        }`}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowEditAdminPassword(!showEditAdminPassword)}
+                                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+                                                        title={showEditAdminPassword ? 'Hide Password' : 'Show Password'}
+                                                    >
+                                                        {showEditAdminPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <label className="block font-semibold text-primary uppercase tracking-wider mb-1">
+                                                    Confirm Password <span className="text-red-500">*</span>
+                                                </label>
+                                                <div className="relative">
+                                                    <input
+                                                        type={showEditAdminConfirmPassword ? 'text' : 'password'}
+                                                        required
+                                                        placeholder="Confirm admin password"
+                                                        value={editAdminConfirmPassword}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value;
+                                                            setEditAdminConfirmPassword(val);
+                                                            if (editAdminPassword && val !== editAdminPassword) {
+                                                                setEditPasswordError('Passwords do not match');
+                                                            } else {
+                                                                setEditPasswordError(null);
+                                                            }
+                                                        }}
+                                                        className={`w-full pl-4 pr-10 py-2.5 bg-background border rounded-xl font-medium text-primary focus:outline-none transition-colors ${
+                                                            editPasswordError
+                                                                ? 'border-rose-500 text-rose-600 focus:border-rose-500'
+                                                                : 'border-input focus:border-accent'
+                                                        }`}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowEditAdminConfirmPassword(!showEditAdminConfirmPassword)}
+                                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+                                                        title={showEditAdminConfirmPassword ? 'Hide Password' : 'Show Password'}
+                                                    >
+                                                        {showEditAdminConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                                    </button>
+                                                </div>
+                                                {editPasswordError && (
+                                                    <p className="text-[11px] text-rose-500 font-semibold mt-1.5 flex items-center gap-1">
+                                                        <AlertCircle size={13} className="shrink-0" />
+                                                        <span>{editPasswordError}</span>
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Action Buttons Footer */}
+                                <div className="flex items-center justify-between pt-4 border-t border-border">
+                                    {editStep === 1 && (
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setIsEditModalOpen(false);
+                                                    setEditStep(1);
+                                                }}
+                                                className="px-4 py-2 border border-input text-xs font-semibold rounded-xl text-primary hover:bg-slate-100 cursor-pointer"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={handleGoToStep2}
+                                                className="px-5 py-2.5 bg-primary text-primary-foreground text-xs font-bold rounded-xl hover:bg-accent hover:text-accent-foreground transition-all flex items-center gap-1.5 shadow-md cursor-pointer"
+                                            >
+                                                <span>Next: Plan Details</span>
+                                                <ChevronRight size={15} />
+                                            </button>
+                                        </>
+                                    )}
+
+                                    {editStep === 2 && (
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={() => setEditStep(1)}
+                                                className="px-4 py-2 border border-input text-xs font-semibold rounded-xl text-primary hover:bg-slate-100 cursor-pointer flex items-center gap-1"
+                                            >
+                                                <ChevronLeft size={15} />
+                                                <span>Back: Company Info</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={handleGoToStep3}
+                                                className="px-5 py-2.5 bg-primary text-primary-foreground text-xs font-bold rounded-xl hover:bg-accent hover:text-accent-foreground transition-all flex items-center gap-1.5 shadow-md cursor-pointer"
+                                            >
+                                                <span>Next: Admin Details</span>
+                                                <ChevronRight size={15} />
+                                            </button>
+                                        </>
+                                    )}
+
+                                    {editStep === 3 && (
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={() => setEditStep(2)}
+                                                className="px-4 py-2 border border-input text-xs font-semibold rounded-xl text-primary hover:bg-slate-100 cursor-pointer flex items-center gap-1"
+                                            >
+                                                <ChevronLeft size={15} />
+                                                <span>Back: Plan Details</span>
+                                            </button>
+                                            <button
+                                                type="submit"
+                                                className="px-5 py-2.5 bg-primary text-primary-foreground text-xs font-bold rounded-xl hover:bg-accent hover:text-accent-foreground transition-all flex items-center gap-1.5 shadow-md cursor-pointer"
+                                            >
+                                                <Check size={15} />
+                                                <span>Save Changes</span>
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                            </form>
+                        </>
+                    )}
                         </motion.div>
                     </div>
                 )}

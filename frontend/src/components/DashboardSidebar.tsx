@@ -2,12 +2,14 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
     LayoutDashboard,
     Layers,
+    Building2,
+    Receipt,
     Settings,
     LogOut,
 } from 'lucide-react';
 
 interface DashboardSidebarProps {
-    activeItem?: 'overview' | 'products' | 'ems' | 'tickets' | 'settings';
+    activeItem?: 'overview' | 'products' | 'tenants' | 'invoices' | 'ems' | 'tickets' | 'settings';
 }
 
 export default function DashboardSidebar({ activeItem = 'overview' }: DashboardSidebarProps) {
@@ -29,7 +31,40 @@ export default function DashboardSidebar({ activeItem = 'overview' }: DashboardS
             href: '/dashboard/products',
             badge: '2 Active',
         },
+        {
+            id: 'tenants',
+            label: 'Tenants',
+            icon: Building2,
+            href: '/dashboard/tenants',
+            badge: null,
+        },
+        {
+            id: 'invoices',
+            label: 'Invoices',
+            icon: Receipt,
+            href: '/dashboard/invoices',
+            badge: null,
+        },
     ];
+
+    const storedUser = (() => {
+        try {
+            const u = localStorage.getItem('user_profile');
+            return u ? JSON.parse(u) : null;
+        } catch {
+            return null;
+        }
+    })();
+
+    const userName = storedUser?.name || 'Dhinakaran Sekar';
+    const userEmail = storedUser?.email || 'contact@thelance.in';
+    const initials = userName
+        .split(' ')
+        .filter(Boolean)
+        .map((n: string) => n[0])
+        .join('')
+        .substring(0, 2)
+        .toUpperCase() || 'DS';
 
     return (
         <aside className="w-full lg:w-[20%] lg:h-screen lg:sticky lg:top-0 lg:min-w-[240px] bg-background/95 backdrop-blur-xl border-b lg:border-b-0 lg:border-r border-border/80 p-5 lg:p-6 flex flex-col justify-between shrink-0 z-20 overflow-y-auto">
@@ -89,15 +124,21 @@ export default function DashboardSidebar({ activeItem = 'overview' }: DashboardS
                 <div className="flex items-center justify-between px-2">
                     <div className="flex items-center gap-2.5 min-w-0">
                         <div className="w-8 h-8 rounded-full bg-accent/20 text-accent font-bold text-xs flex items-center justify-center shrink-0 border border-accent/30">
-                            AD
+                            {initials}
                         </div>
                         <div className="min-w-0 flex-1">
-                            <p className="text-xs font-bold text-primary truncate">Admin User</p>
-                            <p className="text-[10px] text-muted-foreground truncate">admin@gmail.com</p>
+                            <p className="text-xs font-bold text-primary truncate">{userName}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">{userEmail}</p>
                         </div>
                     </div>
                     <button
-                        onClick={() => navigate('/login')}
+                        onClick={() => {
+                            try {
+                                localStorage.removeItem('user_profile');
+                                localStorage.removeItem('auth_token');
+                            } catch {}
+                            navigate('/login', { replace: true });
+                        }}
                         className="p-2 rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-50 transition-colors"
                         title="Sign Out"
                     >

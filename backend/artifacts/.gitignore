@@ -1,0 +1,3 @@
+# Ignore built installer binaries in this folder (served, not versioned)
+*.exe
+*.zip

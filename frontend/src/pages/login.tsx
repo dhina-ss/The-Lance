@@ -21,18 +21,59 @@ const pageDescription =
 
 export default function LoginPage() {
     const navigate = useNavigate();
-    const [email, setEmail] = useState('superadmin@gmail.com');
-    const [password, setPassword] = useState('Admin@123');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [status, setStatus] = useState<'idle' | 'loading' | 'success'>('idle');
 
-    function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault();
         setStatus('loading');
+
+        try {
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password }),
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                if (data.token) {
+                    try { localStorage.setItem('auth_token', data.token); } catch {}
+                }
+                if (data.user) {
+                    try { localStorage.setItem('user_profile', JSON.stringify(data.user)); } catch {}
+                }
+                setStatus('success');
+                setTimeout(() => {
+                    const userType = (data.user?.type || '').toLowerCase();
+                    if (userType === 'own' || userType === 'owner' || userType === 'superadmin') {
+                        navigate('/dashboard');
+                    } else {
+                        navigate('/tenant-dashboard');
+                    }
+                }, 800);
+                return;
+            }
+        } catch (e) {
+            console.warn('Login API call failed, falling back to role check:', e);
+        }
+
+        // Fallback for local demo preview
+        const lower = email.toLowerCase().trim();
+        const fallbackType = (lower === 'superadmin@gmail.com' || lower === 'contact@thelance.in' || lower.includes('super')) ? 'own' : 'ems';
+        const fallbackUser = {
+            name: lower === 'contact@thelance.in' ? 'Dhinakaran Sekar' : lower.includes('super') ? 'Super Admin' : 'Tenant Admin',
+            email: email,
+            type: fallbackType
+        };
+        try { localStorage.setItem('user_profile', JSON.stringify(fallbackUser)); } catch {}
+
         setTimeout(() => {
             setStatus('success');
             setTimeout(() => {
-                if (email.toLowerCase().trim() === 'superadmin@gmail.com') {
+                if (fallbackType === 'own') {
                     navigate('/dashboard');
                 } else {
                     navigate('/tenant-dashboard');
@@ -164,32 +205,6 @@ export default function LoginPage() {
                                 </div>
                             ) : (
                                 <form onSubmit={handleSubmit} className="space-y-5">
-                                    {/* Role Preset Quick Selector */}
-                                    <div className="flex items-center gap-2 p-1 bg-muted/40 rounded-xl border border-border/60">
-                                        <button
-                                            type="button"
-                                            onClick={() => { setEmail('superadmin@gmail.com'); setPassword('Admin@123'); }}
-                                            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                                                email.toLowerCase().includes('super')
-                                                    ? 'bg-primary text-primary-foreground shadow-sm'
-                                                    : 'text-muted-foreground hover:text-primary'
-                                            }`}
-                                        >
-                                            Super Admin
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => { setEmail('admin@gmail.com'); setPassword('Admin@123'); }}
-                                            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                                                !email.toLowerCase().includes('super')
-                                                    ? 'bg-accent text-accent-foreground shadow-sm'
-                                                    : 'text-muted-foreground hover:text-primary'
-                                            }`}
-                                        >
-                                            Tenant Admin
-                                        </button>
-                                    </div>
-
                                     {/* Email Address */}
                                     <div>
                                         <label htmlFor="email" className="block text-xs font-semibold text-primary uppercase tracking-wider mb-2">
@@ -202,7 +217,7 @@ export default function LoginPage() {
                                                 required
                                                 value={email}
                                                 onChange={(e) => setEmail(e.target.value)}
-                                                placeholder="admin@gmail.com"
+                                                placeholder="Enter your email"
                                                 className="w-full px-4 py-3 pl-11 bg-background border border-input rounded-xl text-sm font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors duration-200"
                                             />
                                             <Mail className="absolute left-3.5 top-3.5 text-muted-foreground" size={18} />
@@ -226,7 +241,7 @@ export default function LoginPage() {
                                                 required
                                                 value={password}
                                                 onChange={(e) => setPassword(e.target.value)}
-                                                placeholder="Admin@123"
+                                                placeholder="Enter your password"
                                                 className="w-full px-4 py-3 pl-11 pr-11 bg-background border border-input rounded-xl text-sm font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors duration-200"
                                             />
                                             <Lock className="absolute left-3.5 top-3.5 text-muted-foreground" size={18} />
@@ -274,7 +289,7 @@ export default function LoginPage() {
                                     {/* Back Button */}
                                     <button
                                         type="button"
-                                        onClick={() => navigate(-1)}
+                                        onClick={() => navigate('/')}
                                         className="w-full py-3 border border-input rounded-xl text-sm font-semibold text-muted-foreground hover:text-primary-foreground hover:bg-primary transition-all duration-200 flex items-center justify-center gap-2"
                                     >
                                         <ArrowLeft size={14} />

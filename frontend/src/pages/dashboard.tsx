@@ -1,5 +1,5 @@
 import { Helmet } from '@dr.pogodin/react-helmet';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
@@ -67,6 +67,18 @@ const recentActivity = [
 
 export default function DashboardPage() {
     const navigate = useNavigate();
+
+    useEffect(() => {
+        try {
+            const u = localStorage.getItem('user_profile') || localStorage.getItem('auth_token');
+            if (!u) {
+                navigate('/login', { replace: true });
+            }
+        } catch {
+            navigate('/login', { replace: true });
+        }
+    }, [navigate]);
+
     const [selectedProductFilter, setSelectedProductFilter] = useState<'all' | 'ems' | 'tickets'>('all');
     const [hoveredMonth, setHoveredMonth] = useState<number | null>(null);
 
@@ -408,8 +420,7 @@ export default function DashboardPage() {
                                         {PRODUCTS.map((product) => (
                                             <div
                                                 key={product.id}
-                                                onClick={() => navigate(product.href)}
-                                                className="group bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl p-5 shadow-sm hover:border-primary/40 hover:shadow-md transition-all cursor-pointer space-y-4 flex flex-col justify-between"
+                                                className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl p-5 shadow-sm space-y-4 flex flex-col justify-between"
                                             >
                                                 <div className="flex items-start justify-between">
                                                     <div className="flex items-center gap-3">
@@ -417,7 +428,7 @@ export default function DashboardPage() {
                                                             {resolveIcon(product.iconName, 22)}
                                                         </div>
                                                         <div>
-                                                            <h4 className="text-sm font-bold text-primary group-hover:text-accent transition-colors">{product.name}</h4>
+                                                            <h4 className="text-sm font-bold text-primary">{product.name}</h4>
                                                             <p className="text-[11px] text-muted-foreground truncate max-w-[180px]">{product.tagline}</p>
                                                         </div>
                                                     </div>
@@ -426,18 +437,13 @@ export default function DashboardPage() {
                                                     </span>
                                                 </div>
 
-                                                <div className="grid grid-cols-3 gap-2 py-2 border-y border-border/50 text-center">
+                                                <div className="grid grid-cols-3 gap-2 py-2 border-t border-border/50 text-center">
                                                     {product.stats.map((stat) => (
                                                         <div key={stat.label}>
                                                             <p className="text-[10px] font-bold uppercase text-muted-foreground">{stat.label}</p>
                                                             <p className="text-sm font-extrabold text-primary mt-0.5">{stat.value}</p>
                                                         </div>
                                                     ))}
-                                                </div>
-
-                                                <div className="flex items-center justify-between text-xs font-bold text-accent group-hover:translate-x-1 transition-transform">
-                                                    <span>Manage Tenants</span>
-                                                    <ChevronRight size={14} />
                                                 </div>
                                             </div>
                                         ))}

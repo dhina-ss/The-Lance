@@ -46,7 +46,7 @@ export default function CriticalAlerts() {
           return (
             <div
               key={alert.id}
-              className="p-4 rounded-xl border border-border/60 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer group space-y-2"
+              className="p-4 rounded-xl border border-border/60 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer group space-y-2"
             >
               <div className="flex items-start gap-3">
                 <div className={`w-9 h-9 shrink-0 ${alert.iconBg} ${alert.iconColor} rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform`}>

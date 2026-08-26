@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
-import { Search } from 'lucide-react';
+import React from 'react';
+import { Download } from 'lucide-react';
 
-export default function Header({ pageTitle = 'Dashboard Overview' }) {
-  const [searchQuery, setSearchQuery] = useState('');
+export default function Header({ pageTitle = 'Dashboard Overview', onDownloadClick }) {
+  // Always route through the license-key modal (the download needs a key).
+  const handleDownload = () => onDownloadClick?.();
 
   return (
-    <header className="sticky top-0 z-40 w-full bg-background/90 backdrop-blur-xl border-b border-border/80 px-6 lg:px-10 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <header className="sticky top-0 z-40 w-full bg-background/90 backdrop-blur-xl border-b border-border/80 px-6 lg:px-10 pb-4 pt-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
       <div className="flex items-center gap-3">
         <div>
           <div className="flex items-center gap-2.5">
@@ -23,19 +24,19 @@ export default function Header({ pageTitle = 'Dashboard Overview' }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-        {/* Search Bar */}
-        <div className="relative w-48 lg:w-64">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
-          <input
-            className="w-full bg-background border border-input rounded-xl pl-9 pr-4 py-2 text-xs font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
-            placeholder="Search endpoints, users, IPs..."
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleDownload}
+          className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent/90 text-accent-foreground font-extrabold text-sm rounded-xl shadow-md shadow-accent/20 hover:shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0"
+          title="Download Product Setup Package"
+        >
+          <Download size={16} />
+          <span>Download</span>
+        </button>
       </div>
     </header>
   );
 }
+
+
+

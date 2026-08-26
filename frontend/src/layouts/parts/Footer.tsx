@@ -71,9 +71,18 @@ export default function Footer() {
                     <p className="text-xs opacity-40 tracking-wide">
                         © {new Date().getFullYear()} The Lance. All rights reserved.
                     </p>
-                    <p className="text-xs opacity-40 tracking-widest uppercase">
-                        Software Development Studio
-                    </p>
+                    <div className="flex items-center gap-6">
+                        <button
+                            type="button"
+                            onClick={() => window.revokeAnalyticsConsent?.()}
+                            className="text-xs opacity-40 hover:opacity-100 hover:text-accent transition-opacity tracking-wide"
+                        >
+                            Cookie Settings
+                        </button>
+                        <p className="text-xs opacity-40 tracking-widest uppercase">
+                            Software Development Studio
+                        </p>
+                    </div>
                 </div>
             </div>
         </footer>
