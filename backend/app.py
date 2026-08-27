@@ -1209,6 +1209,65 @@ def cancel_device_command(command_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/installers', methods=['GET'])
+def get_installer_info():
+    """Super-admin: metadata for the current agent installer (no bytes)."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT to_regclass('public.app_installers');")
+        if cur.fetchone()[0] is None:
+            cur.close(); conn.close()
+            return jsonify({'installer': None}), 200
+        cur.execute('SELECT file_name, version, size_bytes, uploaded_at '
+                    'FROM app_installers ORDER BY uploaded_at DESC LIMIT 1;')
+        r = cur.fetchone()
+        cur.close(); conn.close()
+        if not r:
+            return jsonify({'installer': None}), 200
+        return jsonify({'installer': {
+            'fileName': r[0], 'version': r[1], 'sizeBytes': r[2], 'uploadedAt': to_iso(r[3])
+        }}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/installers', methods=['POST'])
+def upload_installer():
+    """Super-admin: upload a new agent installer (.exe). Replaces the current
+    one so tenants always download the latest build."""
+    import psycopg2
+    f = request.files.get('file')
+    if not f:
+        return jsonify({'message': 'A file is required.'}), 400
+    filename = (f.filename or '').strip()
+    if not filename.lower().endswith('.exe'):
+        return jsonify({'message': 'The installer must be a .exe file.'}), 400
+    content = f.read()
+    if not content:
+        return jsonify({'message': 'The uploaded file is empty.'}), 400
+    version = (request.form.get('version') or '').strip() or None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('''CREATE TABLE IF NOT EXISTS app_installers (
+          id serial PRIMARY KEY, file_name varchar(300), version varchar(50),
+          content bytea, size_bytes integer,
+          uploaded_at timestamptz DEFAULT CURRENT_TIMESTAMP);''')
+        cur.execute('DELETE FROM app_installers;')  # keep only the latest
+        cur.execute('INSERT INTO app_installers (file_name, version, content, size_bytes) '
+                    'VALUES (%s,%s,%s,%s);',
+                    ('TheLanceEMSSetup.exe', version, psycopg2.Binary(content), len(content)))
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({'success': True, 'fileName': 'TheLanceEMSSetup.exe',
+                        'version': version, 'sizeBytes': len(content)}), 201
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'message': str(e)}), 500
+
+
 @app.route('/api/packages/<package_id>/content', methods=['GET'])
 def get_package_content(package_id):
     """Agent download: raw installer bytes for an Install/Update command."""

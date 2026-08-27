@@ -276,6 +276,34 @@ export async function uploadPackage(file, displayName, silentArgs) {
   return res.json();
 }
 
+// ---------- product installer (the agent .exe tenants download) ----------
+
+export async function fetchInstallerInfo() {
+  const res = await fetch(`${API_BASE}/api/installers`, { headers: credentialHeaders });
+  if (!res.ok) throwForStatus(res.status);
+  const data = await res.json();
+  return data.installer || null;
+}
+
+export async function uploadInstaller(file, version) {
+  const form = new FormData();
+  form.append('file', file);
+  if (version?.trim()) form.append('version', version.trim());
+  const res = await fetch(`${API_BASE}/api/installers`, {
+    method: 'POST',
+    headers: credentialHeaders, // no Content-Type: browser sets the multipart boundary
+    body: form,
+  });
+  if (!res.ok) {
+    if (res.status === 400) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.message ?? 'The installer could not be uploaded.');
+    }
+    throwForStatus(res.status);
+  }
+  return res.json();
+}
+
 // ---------- users ----------
 
 export function fetchUsers() {

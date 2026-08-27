@@ -15,10 +15,14 @@ import {
     Zap,
     CheckCircle2,
     Search,
+    UploadCloud,
+    Package,
+    Loader2,
 } from 'lucide-react';
 import { resolveIcon, PRODUCTS, ProductConfig } from '../../lib/products';
 import DashboardSidebar from '../../components/DashboardSidebar';
 import { credentialHeaders } from '../../api/client';
+import { fetchInstallerInfo, uploadInstaller, formatBytes } from '../../api/ems';
 
 const fadeUp = {
     hidden: { opacity: 0, y: 20 },
@@ -115,6 +119,108 @@ function CustomSelect({
                 </div>
             )}
         </div>
+    );
+}
+
+/* ── Agent Installer management (super-admin uploads the .exe tenants download) ── */
+function AgentInstallerCard() {
+    const [info, setInfo] = useState<{ fileName: string; version: string | null; sizeBytes: number; uploadedAt: string } | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [uploading, setUploading] = useState(false);
+    const [version, setVersion] = useState('');
+    const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+    const fileRef = useRef<HTMLInputElement>(null);
+
+    const load = () => {
+        setLoading(true);
+        fetchInstallerInfo()
+            .then((i: any) => setInfo(i))
+            .catch(() => setInfo(null))
+            .finally(() => setLoading(false));
+    };
+    useEffect(() => { load(); }, []);
+
+    const handleFile = async (file: File) => {
+        if (!file.name.toLowerCase().endsWith('.exe')) {
+            setMsg({ ok: false, text: 'Please choose a .exe installer file.' });
+            return;
+        }
+        setUploading(true);
+        setMsg(null);
+        try {
+            const res: any = await uploadInstaller(file, version);
+            setMsg({ ok: true, text: `Uploaded ${file.name} (${formatBytes(res.sizeBytes || file.size)}). Tenants now download this build.` });
+            setVersion('');
+            load();
+        } catch (err: any) {
+            setMsg({ ok: false, text: err?.message || 'Upload failed.' });
+        } finally {
+            setUploading(false);
+            if (fileRef.current) fileRef.current.value = '';
+        }
+    };
+
+    const uploadedText = info?.uploadedAt ? new Date(info.uploadedAt).toLocaleString() : '';
+
+    return (
+        <motion.div variants={fadeUp} className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl p-5 shadow-sm">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                    <div className="p-2.5 rounded-xl bg-accent/10 text-accent shrink-0">
+                        <Package size={20} />
+                    </div>
+                    <div>
+                        <h3 className="text-sm font-bold text-primary uppercase tracking-wider">Agent Installer</h3>
+                        <p className="text-[11px] text-muted-foreground mt-0.5 max-w-md">
+                            The <span className="font-semibold text-primary">TheLanceEMSSetup.exe</span> that every tenant downloads. Upload a new build to roll it out to all tenants instantly.
+                        </p>
+                        <div className="mt-2 text-xs text-muted-foreground">
+                            {loading ? (
+                                <span className="inline-flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Loading…</span>
+                            ) : info ? (
+                                <span>
+                                    Current: <span className="font-bold text-primary">v{info.version || 'unknown'}</span>
+                                    {' · '}{formatBytes(info.sizeBytes)}{uploadedText ? <> · uploaded {uploadedText}</> : null}
+                                </span>
+                            ) : (
+                                <span className="text-rose-600 font-semibold">No installer uploaded yet.</span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                    <input
+                        type="text"
+                        placeholder="Version (e.g. 1.0.19)"
+                        value={version}
+                        onChange={(e) => setVersion(e.target.value)}
+                        className="w-36 px-3 py-2.5 bg-background border border-input rounded-xl text-xs font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors"
+                    />
+                    <input
+                        ref={fileRef}
+                        type="file"
+                        accept=".exe"
+                        className="hidden"
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+                    />
+                    <button
+                        type="button"
+                        disabled={uploading}
+                        onClick={() => fileRef.current?.click()}
+                        className="px-5 py-2.5 bg-primary text-primary-foreground text-xs font-bold rounded-xl shadow-md hover:bg-accent hover:text-accent-foreground transition-all duration-200 flex items-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                        {uploading ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
+                        <span>{uploading ? 'Uploading…' : 'Upload New Installer'}</span>
+                    </button>
+                </div>
+            </div>
+            {msg && (
+                <div className={`mt-3 text-xs font-medium px-3 py-2 rounded-lg ${msg.ok ? 'bg-emerald-500/10 text-emerald-700' : 'bg-rose-500/10 text-rose-700'}`}>
+                    {msg.text}
+                </div>
+            )}
+        </motion.div>
     );
 }
 
@@ -319,6 +425,9 @@ export default function ProductConsolePage() {
                                     <p className="text-[11px] text-muted-foreground">All services running smoothly</p>
                                 </div>
                             </motion.div>
+
+                            {/* Agent Installer management */}
+                            <AgentInstallerCard />
 
                             {/* Search & Status Filter Toolbar */}
                             <motion.div variants={fadeUp} className="bg-background/90 backdrop-blur-xl border border-border/80 p-4 rounded-2xl shadow-sm">
