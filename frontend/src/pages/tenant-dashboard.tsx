@@ -12,7 +12,7 @@ import ActivityLog from '../components/tenant/ActivityLog';
 import CriticalAlerts from '../components/tenant/CriticalAlerts';
 import DevicesPage from '../components/tenant/DevicesPage';
 import UsersPage from '../components/tenant/UsersPage';
-import { fetchDevices } from '../api/ems';
+import { fetchDevices, fetchOverview } from '../api/ems';
 import { API_BASE, getAuthHeaders } from '../api/client';
 import { Sparkles, Clock, AlertTriangle, FileBarChart, Settings as SettingsIcon } from 'lucide-react';
 
@@ -48,6 +48,7 @@ export default function TenantDashboardPage() {
 	const [activeTab, setActiveTab] = useState('dashboard');
 	const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 	const [stats, setStats] = useState({ total: 0, online: 0, sleep: 0, offline: 0 });
+	const [overview, setOverview] = useState<{ osDistribution: any[]; performance: any[]; activity: any[]; alerts: any[] }>({ osDistribution: [], performance: [], activity: [], alerts: [] });
 	const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
 
 	const handleNavigateToDevice = (deviceId: string) => {
@@ -112,6 +113,17 @@ export default function TenantDashboardPage() {
 				});
 			} catch {
 				// Overview counts are best-effort
+			}
+			try {
+				const ov = await fetchOverview();
+				setOverview({
+					osDistribution: ov.osDistribution || [],
+					performance: ov.performance || [],
+					activity: ov.activity || [],
+					alerts: ov.alerts || [],
+				});
+			} catch {
+				// Overview panels are best-effort
 			}
 		};
 		load();
@@ -263,17 +275,17 @@ export default function TenantDashboardPage() {
 
 								{/* Main Charts & Grid Area */}
 								<motion.div variants={fadeUp} className="grid grid-cols-12 gap-6">
-									<PerformanceMatrix />
-									<OsDistribution />
+									<PerformanceMatrix data={overview.performance} />
+									<OsDistribution items={overview.osDistribution} />
 								</motion.div>
 
 								<motion.div variants={fadeUp} className="grid grid-cols-12 gap-6">
-									<ActivityLog />
+									<ActivityLog items={overview.activity} />
 								</motion.div>
 
 								<motion.div variants={fadeUp} className="grid grid-cols-12 gap-6">
 									<div className="col-span-12 flex flex-col">
-										<CriticalAlerts />
+										<CriticalAlerts items={overview.alerts} />
 									</div>
 								</motion.div>
 							</motion.div>

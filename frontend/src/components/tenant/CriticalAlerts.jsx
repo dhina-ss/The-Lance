@@ -1,32 +1,26 @@
 import React from 'react';
-import { AlertTriangle, AlertCircle, ShieldAlert, ChevronDown } from 'lucide-react';
+import { AlertTriangle, AlertCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { relativeTime } from '../../api/ems';
 
-const alertsList = [
-  {
-    id: 'CPU-9812',
-    title: 'High CPU Utilization Warning',
-    time: '2m ago',
-    description: 'Server-DB-Production-01 is exceeding 98% sustained CPU capacity.',
-    tag: 'Urgent',
-    tagBg: 'bg-rose-500/10 text-rose-500 border border-rose-500/20',
-    icon: AlertTriangle,
-    iconBg: 'bg-rose-500/10',
-    iconColor: 'text-rose-500',
-  },
-  {
-    id: 'SEC-2241',
-    title: 'Firewall Policy Disabled',
-    time: '15m ago',
-    description: 'Endpoint-WK-LT-442 security policy bypass detected by local user.',
-    tag: 'Active Policy',
-    tagBg: 'bg-primary/10 text-primary border border-primary/20',
-    icon: ShieldAlert,
-    iconBg: 'bg-primary/10',
-    iconColor: 'text-primary',
-  },
-];
+const SEVERITY_STYLE = {
+  Severe: { tagBg: 'bg-rose-500/10 text-rose-500 border border-rose-500/20', icon: AlertTriangle, iconBg: 'bg-rose-500/10', iconColor: 'text-rose-500' },
+  High: { tagBg: 'bg-rose-500/10 text-rose-500 border border-rose-500/20', icon: AlertTriangle, iconBg: 'bg-rose-500/10', iconColor: 'text-rose-500' },
+  Medium: { tagBg: 'bg-amber-500/10 text-amber-600 border border-amber-500/20', icon: ShieldAlert, iconBg: 'bg-amber-500/10', iconColor: 'text-amber-500' },
+  Low: { tagBg: 'bg-primary/10 text-primary border border-primary/20', icon: ShieldAlert, iconBg: 'bg-primary/10', iconColor: 'text-primary' },
+};
 
-export default function CriticalAlerts() {
+export default function CriticalAlerts({ items = [] }) {
+  const alertsList = (items || []).map((a) => {
+    const style = SEVERITY_STYLE[a.severity] || SEVERITY_STYLE.Medium;
+    return {
+      id: a.id,
+      title: a.title,
+      time: a.detectedAt ? relativeTime(a.detectedAt) : '',
+      description: `Detected on ${a.device}.`,
+      tag: a.severity,
+      ...style,
+    };
+  });
   return (
     <div className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl p-6 shadow-sm flex-1 space-y-4">
       <div className="flex items-center justify-between pb-3 border-b border-border/60">
@@ -34,13 +28,17 @@ export default function CriticalAlerts() {
           <AlertCircle size={18} className="text-rose-500" />
           Critical Alerts Stream
         </h3>
-        <button className="px-3 py-1.5 bg-background border border-input rounded-xl text-xs font-semibold text-primary hover:bg-muted/50 transition-colors flex items-center gap-1.5 cursor-pointer">
-          <span>Last Month</span>
-          <ChevronDown size={14} />
-        </button>
+        <span className="text-[11px] font-bold text-muted-foreground">Unresolved threats</span>
       </div>
 
       <div className="space-y-3">
+        {alertsList.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
+            <ShieldCheck size={28} className="text-emerald-500" />
+            <p className="text-xs font-semibold text-primary">No active threats</p>
+            <p className="text-[11px] text-muted-foreground">Your fleet is clear of unresolved security alerts.</p>
+          </div>
+        )}
         {alertsList.map((alert) => {
           const Icon = alert.icon;
           return (

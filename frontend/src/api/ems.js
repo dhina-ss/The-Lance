@@ -125,6 +125,11 @@ export function fetchDeviceMetrics(id) {
   return getJson(`/api/devices/${encodeURIComponent(id)}/metrics`);
 }
 
+// Live aggregate data for the tenant dashboard overview.
+export function fetchOverview() {
+  return getJson('/api/overview');
+}
+
 export function fetchInstalledApps(id) {
   return getJson(`/api/devices/${encodeURIComponent(id)}/installed-apps`);
 }

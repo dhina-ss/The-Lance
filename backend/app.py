@@ -1617,6 +1617,102 @@ def get_device_work_time(device_id):
         return jsonify({'error': str(e)}), 500
 
 
+def _os_group(os_version):
+    v = (os_version or '').lower()
+    if 'windows' in v or 'microsoft' in v:
+        return 'windows'
+    if 'mac' in v or 'darwin' in v or 'os x' in v:
+        return 'macos'
+    if any(k in v for k in ('ubuntu', 'linux', 'debian', 'fedora', 'centos', 'red hat', 'redhat')):
+        return 'linux'
+    return 'other'
+
+
+@app.route('/api/overview', methods=['GET'])
+def get_overview():
+    """Live aggregate data for the tenant dashboard overview: OS distribution,
+    current per-device resource usage, recent activity, and security alerts."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # --- OS distribution (grouped by OS version) ---
+        cur.execute('SELECT COALESCE(NULLIF("OSVersion", \'\'), \'Unknown\') AS os, COUNT(*) '
+                    'FROM devices GROUP BY os ORDER BY COUNT(*) DESC;')
+        os_rows = cur.fetchall()
+        os_total = sum(r[1] for r in os_rows) or 1
+        os_distribution = [{
+            'name': r[0], 'count': r[1],
+            'percentage': round(r[1] * 100 / os_total),
+            'group': _os_group(r[0]),
+        } for r in os_rows]
+
+        # --- Current per-device resource usage (latest snapshot) ---
+        cur.execute('SELECT d."DeviceName", m.cpu_percent, m.mem_percent, m.disk_percent '
+                    'FROM device_metrics m JOIN devices d ON d."DeviceId" = m.device_id '
+                    'ORDER BY m.cpu_percent DESC NULLS LAST LIMIT 8;')
+        performance = [{
+            'label': r[0] or '—',
+            'cpu': round(float(r[1])) if r[1] is not None else 0,
+            'memory': round(float(r[2])) if r[2] is not None else 0,
+            'disk': round(float(r[3])) if r[3] is not None else 0,
+        } for r in cur.fetchall()]
+
+        # --- Recent activity: install/uninstall commands + device registrations/activations ---
+        activity = []
+        cur.execute('SELECT c.type, c.target_app_name, c.status, c.created_at, d."DeviceName" '
+                    'FROM device_commands c LEFT JOIN devices d ON d."DeviceId" = c.device_id '
+                    'ORDER BY c.created_at DESC LIMIT 8;')
+        for r in cur.fetchall():
+            activity.append({'type': f'{r[0]} App', 'subject': r[1] or '—',
+                             'actor': r[4] or '—', 'timestamp': to_iso(r[3]),
+                             'status': r[2] or 'Pending', 'category': 'command'})
+        cur.execute('SELECT "DeviceName", "CreatedDate", "ActivatedAt" FROM devices '
+                    'ORDER BY "CreatedDate" DESC NULLS LAST LIMIT 5;')
+        for r in cur.fetchall():
+            if r[2]:
+                activity.append({'type': 'Device Activation', 'subject': r[0] or '—',
+                                 'actor': r[0] or '—', 'timestamp': to_iso(r[2]),
+                                 'status': 'Activated', 'category': 'activation'})
+            activity.append({'type': 'Device Registration', 'subject': r[0] or '—',
+                             'actor': r[0] or '—', 'timestamp': to_iso(r[1]),
+                             'status': 'Registered', 'category': 'registration'})
+        activity = sorted([a for a in activity if a['timestamp']],
+                          key=lambda a: a['timestamp'], reverse=True)[:8]
+
+        # --- Security alerts (threats), if the table exists ---
+        alerts = []
+        cur.execute("SELECT to_regclass('public.device_threats');")
+        if cur.fetchone()[0] is not None:
+            cur.execute('SELECT t.id, t.name, t.severity, t.detected_at, t.remediated, d."DeviceName" '
+                        'FROM device_threats t LEFT JOIN devices d ON d."DeviceId" = t.device_id '
+                        'WHERE COALESCE(t.remediated, false) = false '
+                        'ORDER BY t.detected_at DESC NULLS LAST LIMIT 8;')
+            def _sev_label(s):
+                try:
+                    s = int(s)
+                except (TypeError, ValueError):
+                    return 'Medium'
+                return 'Severe' if s >= 5 else 'High' if s == 4 else 'Medium' if s >= 2 else 'Low'
+            for r in cur.fetchall():
+                alerts.append({'id': str(r[0]), 'title': r[1] or 'Threat detected',
+                               'severity': _sev_label(r[2]), 'detectedAt': to_iso(r[3]),
+                               'device': r[5] or 'Unknown device', 'remediated': bool(r[4])})
+
+        cur.close()
+        conn.close()
+        return jsonify({
+            'osDistribution': os_distribution,
+            'performance': performance,
+            'activity': activity,
+            'alerts': alerts,
+        }), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/devices/<device_id>/threats', methods=['GET'])
 def get_device_threats(device_id):
     key = _resolve_device_key(device_id) or device_id

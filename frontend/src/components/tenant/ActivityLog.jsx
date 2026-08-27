@@ -1,58 +1,31 @@
 import React from 'react';
-import { Activity, DownloadCloud, UserPlus, Key, AlertTriangle, CheckCircle2, ChevronRight } from 'lucide-react';
+import { Activity, DownloadCloud, UserPlus, CheckCircle2 } from 'lucide-react';
+import { relativeTime } from '../../api/ems';
 
-const activities = [
-  {
-    id: 1,
-    type: 'Software Patch',
-    icon: DownloadCloud,
-    iconBg: 'bg-primary/10',
-    iconColor: 'text-primary',
-    subject: 'KB5032486 Update',
-    actor: 'System-Automator',
-    timestamp: '2026-08-19 21:40',
-    status: 'Completed',
-    statusBg: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20',
-  },
-  {
-    id: 2,
-    type: 'Device Registration',
-    icon: UserPlus,
-    iconBg: 'bg-accent/10',
-    iconColor: 'text-accent',
-    subject: 'Workstation-NY-42',
-    actor: 'j_doe@enterprise.com',
-    timestamp: '2026-08-19 20:15',
-    status: 'Active',
-    statusBg: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20',
-  },
-  {
-    id: 3,
-    type: 'Admin Access',
-    icon: Key,
-    iconBg: 'bg-amber-500/10',
-    iconColor: 'text-amber-500',
-    subject: 'Root Console Login',
-    actor: 'sec-admin-01',
-    timestamp: '2026-08-19 19:30',
-    status: 'Verified',
-    statusBg: 'bg-primary/10 text-primary border border-primary/20',
-  },
-  {
-    id: 4,
-    type: 'Policy Violation',
-    icon: AlertTriangle,
-    iconBg: 'bg-rose-500/10',
-    iconColor: 'text-rose-500',
-    subject: 'Unlicensed Software',
-    actor: 'User-88219',
-    timestamp: '2026-08-19 18:05',
-    status: 'Blocked',
-    statusBg: 'bg-rose-500/10 text-rose-500 border border-rose-500/20',
-  },
-];
+const CATEGORY_STYLE = {
+  command: { icon: DownloadCloud, iconBg: 'bg-primary/10', iconColor: 'text-primary' },
+  activation: { icon: CheckCircle2, iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-600' },
+  registration: { icon: UserPlus, iconBg: 'bg-accent/10', iconColor: 'text-accent' },
+};
 
-export default function ActivityLog() {
+function statusBg(status) {
+  const s = (status || '').toLowerCase();
+  if (['succeeded', 'active', 'activated', 'registered', 'completed'].includes(s)) return 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20';
+  if (['failed', 'cancelled', 'canceled', 'blocked'].includes(s)) return 'bg-rose-500/10 text-rose-500 border border-rose-500/20';
+  return 'bg-amber-500/10 text-amber-600 border border-amber-500/20';
+}
+
+export default function ActivityLog({ items = [] }) {
+  const activities = (items || []).map((a, i) => ({
+    id: i,
+    type: a.type,
+    subject: a.subject,
+    actor: a.actor,
+    timestamp: a.timestamp ? relativeTime(a.timestamp) : '',
+    status: a.status,
+    statusBg: statusBg(a.status),
+    ...(CATEGORY_STYLE[a.category] || CATEGORY_STYLE.command),
+  }));
   return (
     <div className="col-span-12 xl:col-span-12 bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl p-6 shadow-sm overflow-hidden space-y-4">
       <div className="flex items-center justify-between pb-3 border-b border-border/60">
@@ -76,6 +49,9 @@ export default function ActivityLog() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border/40 text-xs">
+            {activities.length === 0 && (
+              <tr><td colSpan={6} className="py-8 text-center text-muted-foreground">No recent activity yet.</td></tr>
+            )}
             {activities.map((row) => {
               const Icon = row.icon;
               return (
