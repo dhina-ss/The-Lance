@@ -1914,9 +1914,28 @@ def verify_license_download():
         traceback.print_exc()
         return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
 
-def find_latest_installer():
-    """Newest agent installer to serve: backend/artifacts first (production
-    upload target), then the local EMS build output (dev convenience)."""
+def get_installer_bytes():
+    """Returns (filename, bytes) for the agent installer to bundle in the
+    download zip. The DB (app_installers) is the source of truth in production
+    (Render has no persistent disk), with the local build output as a dev
+    fallback. Returns (None, None) if no installer is available."""
+    # 1) Database (production).
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT to_regclass('public.app_installers');")
+        if cur.fetchone()[0] is not None:
+            cur.execute('SELECT file_name, content FROM app_installers '
+                        'ORDER BY uploaded_at DESC LIMIT 1;')
+            row = cur.fetchone()
+            if row and row[1] is not None:
+                cur.close(); conn.close()
+                return (row[0] or 'TheLanceEMSSetup.exe', bytes(row[1]))
+        cur.close(); conn.close()
+    except Exception as e:
+        print(f"Installer DB lookup failed: {e}")
+
+    # 2) Local filesystem (dev convenience).
     import glob
     here = os.path.dirname(__file__)
     candidates = glob.glob(os.path.join(here, 'artifacts', '*.exe'))
@@ -1924,7 +1943,11 @@ def find_latest_installer():
     candidates += glob.glob(os.path.join(build_output, 'TheLanceEMSSetup-*.exe'))
     candidates += glob.glob(os.path.join(build_output, 'EMSAgentSetup-*.exe'))
     candidates = [c for c in candidates if os.path.isfile(c)]
-    return max(candidates, key=os.path.getmtime) if candidates else None
+    if candidates:
+        path = max(candidates, key=os.path.getmtime)
+        with open(path, 'rb') as f:
+            return ('TheLanceEMSSetup.exe', f.read())
+    return (None, None)
 
 
 @app.route('/api/download-file', methods=['GET'])
@@ -1993,11 +2016,10 @@ def download_product_file():
                     'error': 'No license is linked to your account. Contact your administrator.'
                 }), 403
 
-        installer = find_latest_installer()
-        if not installer:
+        installer_name, installer_bytes = get_installer_bytes()
+        if not installer_bytes:
             return jsonify({
-                'error': 'The installer is not available yet. Upload the built '
-                         'TheLanceEMSSetup-*.exe to backend/artifacts/.'
+                'error': 'The installer is not available yet. Please contact your administrator.'
             }), 503
 
         readme = (
@@ -2014,7 +2036,7 @@ def download_product_file():
 
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-            zf.write(installer, arcname='TheLanceEMSSetup.exe')
+            zf.writestr('TheLanceEMSSetup.exe', installer_bytes)
             zf.writestr('license.key', license_key + '\n')
             zf.writestr('README.txt', readme)
         buffer.seek(0)
