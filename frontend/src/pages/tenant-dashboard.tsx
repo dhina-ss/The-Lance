@@ -79,12 +79,22 @@ export default function TenantDashboardPage() {
 			const a = document.createElement('a');
 			a.href = url;
 			a.download = name;
+			a.rel = 'noopener';
 			document.body.appendChild(a);
 			a.click();
-			document.body.removeChild(a);
-			URL.revokeObjectURL(url);
-		} catch {
-			setDownloadError('No license is linked to your account. Contact your administrator.');
+			// Revoke the blob URL AFTER the browser has started the download.
+			// Revoking it synchronously here aborts a large-file download in
+			// Firefox (and can in other browsers), so defer the cleanup.
+			setTimeout(() => {
+				document.body.removeChild(a);
+				URL.revokeObjectURL(url);
+			}, 2000);
+		} catch (err) {
+			setDownloadError(
+				err instanceof Error && /fetch|network/i.test(err.message)
+					? 'Could not reach the server. The installer service may be waking up — please try again in a minute.'
+					: 'The installer could not be downloaded. Please try again or contact your administrator.'
+			);
 		} finally {
 			setDownloading(false);
 		}
