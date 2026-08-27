@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, DownloadCloud, UserPlus, CheckCircle2, ChevronRight } from 'lucide-react';
+import { Activity, DownloadCloud, UserPlus, CheckCircle2 } from 'lucide-react';
 import { relativeTime } from '../../api/ems';
 
 const CATEGORY_STYLE = {
@@ -45,12 +45,11 @@ export default function ActivityLog({ items = [] }) {
               <th className="py-3 px-4">Actor</th>
               <th className="py-3 px-4">Timestamp</th>
               <th className="py-3 px-4 text-center">Status</th>
-              <th className="py-3 px-4 text-right">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border/40 text-xs">
             {activities.length === 0 && (
-              <tr><td colSpan={6} className="py-8 text-center text-muted-foreground">No recent activity yet.</td></tr>
+              <tr><td colSpan={5} className="py-8 text-center text-muted-foreground">No recent activity yet.</td></tr>
             )}
             {activities.map((row) => {
               const Icon = row.icon;
@@ -71,12 +70,6 @@ export default function ActivityLog({ items = [] }) {
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold ${row.statusBg}`}>
                       {row.status}
                     </span>
-                  </td>
-                  <td className="py-3.5 px-4 text-right">
-                    <button className="text-accent font-bold hover:underline inline-flex items-center gap-0.5 cursor-pointer">
-                      <span>View</span>
-                      <ChevronRight size={12} />
-                    </button>
                   </td>
                 </tr>
               );
