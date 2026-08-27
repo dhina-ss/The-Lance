@@ -2074,23 +2074,42 @@ def verify_license_download():
         traceback.print_exc()
         return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
 
+_installer_cache = {'key': None, 'name': None, 'data': None}
+
+
 def get_installer_bytes():
     """Returns (filename, bytes) for the agent installer to bundle in the
     download zip. The DB (app_installers) is the source of truth in production
     (Render has no persistent disk), with the local build output as a dev
-    fallback. Returns (None, None) if no installer is available."""
+    fallback. Returns (None, None) if no installer is available.
+
+    The 53 MB blob is cached in process memory keyed by (size, uploaded_at):
+    each download then does only a tiny metadata query instead of re-reading
+    the whole file from Neon, which is the main cost of a warm download. A new
+    upload changes the key and invalidates the cache automatically."""
+    global _installer_cache
     # 1) Database (production).
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT to_regclass('public.app_installers');")
         if cur.fetchone()[0] is not None:
-            cur.execute('SELECT file_name, content FROM app_installers '
+            cur.execute('SELECT file_name, size_bytes, uploaded_at FROM app_installers '
                         'ORDER BY uploaded_at DESC LIMIT 1;')
-            row = cur.fetchone()
-            if row and row[1] is not None:
-                cur.close(); conn.close()
-                return (row[0] or 'TheLanceEMSSetup.exe', bytes(row[1]))
+            meta = cur.fetchone()
+            if meta:
+                key = f"{meta[1]}|{meta[2]}"
+                if _installer_cache['key'] == key and _installer_cache['data'] is not None:
+                    cur.close(); conn.close()
+                    return (_installer_cache['name'], _installer_cache['data'])
+                cur.execute('SELECT content FROM app_installers ORDER BY uploaded_at DESC LIMIT 1;')
+                row = cur.fetchone()
+                if row and row[0] is not None:
+                    name = meta[0] or 'TheLanceEMSSetup.exe'
+                    data = bytes(row[0])
+                    _installer_cache = {'key': key, 'name': name, 'data': data}
+                    cur.close(); conn.close()
+                    return (name, data)
         cur.close(); conn.close()
     except Exception as e:
         print(f"Installer DB lookup failed: {e}")
@@ -2195,7 +2214,10 @@ def download_product_file():
         )
 
         buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # The .exe is already a packed binary, so DEFLATE buys ~1% for a lot of
+        # CPU; store it uncompressed (much faster) and only deflate the tiny
+        # text files.
+        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as zf:
             zf.writestr('TheLanceEMSSetup.exe', installer_bytes)
             zf.writestr('license.key', license_key + '\n')
             zf.writestr('README.txt', readme)
