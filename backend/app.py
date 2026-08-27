@@ -1339,12 +1339,12 @@ def get_devices():
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
-            SELECT d.*, 
-                   u."Username" AS "ActivatedByName", 
-                   u."Email" AS "ActivatedByEmail", 
+            SELECT d.*,
+                   u."Username" AS "ActivatedByName",
+                   u."Email" AS "ActivatedByEmail",
                    u."EmployeeCode" AS "ActivatedByEmployeeCode"
             FROM devices d
-            LEFT JOIN app_users u ON d."DeviceId" = u."DeviceId"
+            LEFT JOIN app_users u ON u."Id"::text = d."ActivatedByUserId"
             ORDER BY d."Id" ASC;
         """)
         rows = cur.fetchall()
