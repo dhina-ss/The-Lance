@@ -391,14 +391,15 @@ export default function TenantListPage() {
     }
 
     // Track highest assigned tenant sequence so deleted IDs are NEVER reused
-    const [highestSequence, setHighestSequence] = useState<number>(() => {
-        try {
-            const saved = localStorage.getItem('tl_max_tenant_seq');
-            return saved ? parseInt(saved, 10) : 0;
-        } catch {
-            return 0;
-        }
-    });
+    // The next tenant sequence is derived from the actual tenant list returned
+    // by the server (the DB is the source of truth). We intentionally do NOT
+    // seed this from localStorage: a stale persisted max used to make the
+    // "auto-generated" preview overshoot (e.g. keep showing TL-TNT260007 after
+    // the tenants were cleared). Clean up any leftover key from that scheme.
+    const [highestSequence, setHighestSequence] = useState<number>(0);
+    useEffect(() => {
+        try { localStorage.removeItem('tl_max_tenant_seq'); } catch {}
+    }, []);
 
     const nextTenantNumber = useMemo(() => {
         let maxInList = 0;
@@ -531,9 +532,6 @@ export default function TenantListPage() {
 
                 setHighestSequence((prev) => {
                     const updated = Math.max(prev, assignedNum, nextTenantNumber);
-                    try {
-                        localStorage.setItem('tl_max_tenant_seq', String(updated));
-                    } catch {}
                     return updated;
                 });
 
@@ -569,9 +567,6 @@ export default function TenantListPage() {
                 const fallbackId = String(nextTenantNumber);
                 setHighestSequence((prev) => {
                     const updated = Math.max(prev, nextTenantNumber);
-                    try {
-                        localStorage.setItem('tl_max_tenant_seq', String(updated));
-                    } catch {}
                     return updated;
                 });
 
