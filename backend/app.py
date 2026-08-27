@@ -546,7 +546,7 @@ def get_tenants():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT id, tenant_name, product_name, expiry_date, plan_type, subscription_type, has_trial, tenant_mail, admin_mail, status, address, mobile_number, max_users, feature_modules, license_key FROM tenants ORDER BY id DESC;")
+        cur.execute("SELECT id, tenant_name, product_name, expiry_date, plan_type, subscription_type, has_trial, tenant_mail, admin_mail, status, address, mobile_number, max_users, feature_modules, license_key, admin_name FROM tenants ORDER BY id DESC;")
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -573,7 +573,8 @@ def get_tenants():
                 'mobileNumber': r[11] or '',
                 'maxUsers': r[12] if r[12] is not None else 100,
                 'featureModules': feature_modules,
-                'licenseKey': r[14] or ''
+                'licenseKey': r[14] or '',
+                'adminName': r[15] or ''
             })
         return jsonify(tenants_list), 200
     except Exception as e:
@@ -588,9 +589,9 @@ def get_single_tenant(tenant_id):
         cur = conn.cursor()
         t_id_str = str(tenant_id).lower()
         cur.execute("""
-            SELECT id, tenant_name, product_name, expiry_date, plan_type, subscription_type, has_trial, tenant_mail, admin_mail, status, address, mobile_number, max_users, feature_modules, license_key 
-            FROM tenants 
-            WHERE id::text = %s 
+            SELECT id, tenant_name, product_name, expiry_date, plan_type, subscription_type, has_trial, tenant_mail, admin_mail, status, address, mobile_number, max_users, feature_modules, license_key, admin_name
+            FROM tenants
+            WHERE id::text = %s
                OR LOWER(tenant_name) = %s 
                OR REPLACE(LOWER(tenant_name), ' ', '-') = %s 
                OR REPLACE(LOWER(tenant_name), '-', ' ') = %s;
@@ -621,7 +622,8 @@ def get_single_tenant(tenant_id):
                 'mobileNumber': r[11] or '',
                 'maxUsers': r[12] if r[12] is not None else 100,
                 'featureModules': feature_modules,
-                'licenseKey': r[14] or ''
+                'licenseKey': r[14] or '',
+                'adminName': r[15] or ''
             }), 200
         return jsonify({'error': 'Tenant not found'}), 404
     except Exception as e:
@@ -641,6 +643,7 @@ def create_tenant():
         has_trial = data.get('hasTrial', 'None')
         tenant_mail = data.get('tenantMail', '')
         admin_mail = data.get('adminMail', '')
+        admin_name = data.get('adminName', '')
         status = data.get('status', 'Active')
         address = data.get('address', '')
         mobile_number = data.get('mobileNumber', '')
@@ -652,10 +655,10 @@ def create_tenant():
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO tenants (tenant_name, product_name, expiry_date, plan_type, subscription_type, has_trial, tenant_mail, admin_mail, status, address, mobile_number, max_users, feature_modules, license_key)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO tenants (tenant_name, product_name, expiry_date, plan_type, subscription_type, has_trial, tenant_mail, admin_mail, admin_name, status, address, mobile_number, max_users, feature_modules, license_key)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id;
-        """, (tenant_name, product_name, expiry_date, plan_type, subscription_type, has_trial, tenant_mail, admin_mail, status, address, mobile_number, max_users, modules_json, license_key))
+        """, (tenant_name, product_name, expiry_date, plan_type, subscription_type, has_trial, tenant_mail, admin_mail, admin_name, status, address, mobile_number, max_users, modules_json, license_key))
         new_id = cur.fetchone()[0]
         conn.commit()
         cur.close()
@@ -680,6 +683,7 @@ def update_tenant(tenant_id):
         has_trial = data.get('hasTrial', 'None')
         tenant_mail = data.get('tenantMail', '')
         admin_mail = data.get('adminMail', '')
+        admin_name = data.get('adminName', '')
         status = data.get('status', 'Active')
         address = data.get('address', '')
         mobile_number = data.get('mobileNumber', '')
@@ -698,16 +702,17 @@ def update_tenant(tenant_id):
                 has_trial = %s,
                 tenant_mail = %s,
                 admin_mail = %s,
+                admin_name = %s,
                 status = %s,
                 address = %s,
                 mobile_number = %s,
                 max_users = %s,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id::text = %s 
-               OR LOWER(tenant_name) = %s 
-               OR REPLACE(LOWER(tenant_name), ' ', '-') = %s 
+            WHERE id::text = %s
+               OR LOWER(tenant_name) = %s
+               OR REPLACE(LOWER(tenant_name), ' ', '-') = %s
                OR REPLACE(LOWER(tenant_name), '-', ' ') = %s;
-        """, (tenant_name, product_name, expiry_date, plan_type, subscription_type, has_trial, tenant_mail, admin_mail, status, address, mobile_number, max_users, t_id_str, t_id_str, t_id_str, t_id_str))
+        """, (tenant_name, product_name, expiry_date, plan_type, subscription_type, has_trial, tenant_mail, admin_mail, admin_name, status, address, mobile_number, max_users, t_id_str, t_id_str, t_id_str, t_id_str))
 
         conn.commit()
         cur.close()
