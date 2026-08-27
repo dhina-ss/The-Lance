@@ -766,7 +766,7 @@ export default function TenantDetailsPage() {
                         address: d.address || '100 Innovation Way, Suite 400',
                         city: 'San Francisco, CA',
                         country: 'United States',
-                        adminName: d.adminMail ? (d.adminMail.includes('@') ? d.adminMail.split('@')[0] : d.adminMail) : 'Admin',
+                        adminName: d.adminName || (d.adminMail ? (d.adminMail.includes('@') ? d.adminMail.split('@')[0] : d.adminMail) : 'Admin'),
                         adminEmail: d.adminMail || 'admin@domain.com',
                         adminPhone: d.mobileNumber || '+1 (555) 382-9102',
                         status: (d.status || 'Active') as any,
@@ -950,6 +950,7 @@ export default function TenantDetailsPage() {
             hasTrial: 'None',
             tenantMail: `contact@${editDomain.trim()}`,
             adminMail: editAdminEmail.trim(),
+            adminName: editAdminName.trim(),
             status: editStatus,
             address: editAddress.trim(),
             mobileNumber: editPhone.trim(),
@@ -1705,7 +1706,7 @@ export default function TenantDetailsPage() {
                                         <div>
                                             <h3 className="text-base font-bold text-primary">System-Level Audit Logs</h3>
                                             <p className="text-xs text-muted-foreground mt-0.5">
-                                                Immutable record of security events, administrative changes, and status updates for {tenant.companyName}.
+                                                Immutable record of security events, administrative changes, and status updates.
                                             </p>
                                         </div>
 
