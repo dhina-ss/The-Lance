@@ -57,6 +57,19 @@ def verify_token(token_str):
     except Exception:
         return None
 
+@app.errorhandler(Exception)
+def handle_error(err):
+    """Ensure API routes always answer with JSON, even on an unhandled error.
+    Without this, Flask returns an HTML error page for a 500, and the frontend
+    fetch()/JSON.parse fails with 'Unexpected token <' instead of a usable
+    message. Non-API routes keep Flask's default (HTML) behaviour."""
+    from werkzeug.exceptions import HTTPException
+    code = err.code if isinstance(err, HTTPException) else 500
+    if request.path.startswith('/api/'):
+        return jsonify({'error': type(err).__name__, 'message': str(err)}), code
+    raise err
+
+
 @app.before_request
 def authenticate_request():
     if request.method == 'OPTIONS':
@@ -161,11 +174,27 @@ def get_db_connection():
     import psycopg2
     return psycopg2.connect(DATABASE_URL)
 
+def _db_host():
+    """Host portion of DATABASE_URL, for diagnostics (never exposes the password)."""
+    import re
+    m = re.search(r'@([^/:?]+)', DATABASE_URL or '')
+    return m.group(1) if m else 'unknown'
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     db_status = "connected"
+    tables_ok = None
     try:
         conn = get_db_connection()
+        cur = conn.cursor()
+        # Confirm the console tables exist in THIS database (a deploy pointed at
+        # the wrong Neon DB connects fine but is missing these).
+        cur.execute("SELECT to_regclass('public.devices') IS NOT NULL, "
+                    "to_regclass('public.app_users') IS NOT NULL;")
+        d, u = cur.fetchone()
+        tables_ok = bool(d and u)
+        cur.close()
         conn.close()
     except Exception as e:
         db_status = f"error: {str(e)}"
@@ -173,6 +202,8 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "database": db_status,
+        "dbHost": _db_host(),
+        "consoleTablesPresent": tables_ok,
         "message": "The Lance Flask API server is running smoothly",
         "version": "1.0.0"
     })
