@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, DownloadCloud, UserPlus, CheckCircle2 } from 'lucide-react';
+import { Activity, DownloadCloud, UserPlus, CheckCircle2, ChevronRight } from 'lucide-react';
 import { relativeTime } from '../../api/ems';
 
 const CATEGORY_STYLE = {

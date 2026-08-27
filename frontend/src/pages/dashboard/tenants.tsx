@@ -89,107 +89,6 @@ export function formatTenantId(id: string | number): string {
     return `TL-TNT${yearStr}${seqStr}`;
 }
 
-const initialTenantsList: TenantItem[] = [
-    {
-        id: 'tnt-1',
-        productId: 'ems',
-        tenantName: 'Nexus Global Tech',
-        domain: 'nexusglobal.com',
-        adminName: 'Alex Mercer',
-        adminEmail: 'alex.m@nexusglobal.com',
-        planType: 'Enterprise',
-        subscriptionType: 'Annual Recurring',
-        status: 'Active',
-        createdAt: '2025-11-12',
-        unitsManaged: 850,
-        licenseKey: 'TL9K-8F7E-6D5C-4B3A',
-    },
-    {
-        id: 'tnt-2',
-        productId: 'ems',
-        tenantName: 'Apex Health Systems',
-        domain: 'apexhealth.org',
-        adminName: 'Elena Rostova',
-        adminEmail: 'elena.r@apexhealth.org',
-        planType: 'Enterprise',
-        subscriptionType: 'Annual Recurring',
-        status: 'Active',
-        createdAt: '2026-01-08',
-        unitsManaged: 620,
-        licenseKey: 'TL7A-6B5C-4D3E-2F1G',
-    },
-    {
-        id: 'tnt-3',
-        productId: 'ems',
-        tenantName: 'CyberDyne Logistics',
-        domain: 'cyberdyne-logistics.io',
-        adminName: 'Marcus Vance',
-        adminEmail: 'm.vance@cyberdyne.io',
-        planType: 'Professional',
-        subscriptionType: 'Monthly Billing',
-        status: 'Active',
-        createdAt: '2026-03-20',
-        unitsManaged: 340,
-        licenseKey: 'TL4M-3N2P-1Q0R-9S8T',
-    },
-    {
-        id: 'tnt-4',
-        productId: 'ems',
-        tenantName: 'Horizon Financial Group',
-        domain: 'horizonfg.com',
-        adminName: 'Sarah Chen',
-        adminEmail: 'sarah.c@horizonfg.com',
-        planType: 'Enterprise',
-        subscriptionType: 'Perpetual License',
-        status: 'Inactive',
-        createdAt: '2026-04-15',
-        unitsManaged: 590,
-        licenseKey: 'TL2U-1V0W-9X8Y-7Z6A',
-    },
-    {
-        id: 'tnt-5',
-        productId: 'tickets',
-        tenantName: 'TechFlow Solutions',
-        domain: 'techflow.io',
-        adminName: 'David Koster',
-        adminEmail: 'david.k@techflow.io',
-        planType: 'Enterprise',
-        subscriptionType: 'Annual Recurring',
-        status: 'Active',
-        createdAt: '2026-02-10',
-        unitsManaged: 64,
-        licenseKey: 'TL8B-7C6D-5E4F-3G2H',
-    },
-    {
-        id: 'tnt-6',
-        productId: 'tickets',
-        tenantName: 'CloudScale Enterprises',
-        domain: 'cloudscale.net',
-        adminName: 'Rachel Green',
-        adminEmail: 'rachel@cloudscale.net',
-        planType: 'Professional',
-        subscriptionType: 'Monthly Billing',
-        status: 'Active',
-        createdAt: '2026-03-01',
-        unitsManaged: 42,
-        licenseKey: 'TL6I-5J4K-3L2M-1N0P',
-    },
-    {
-        id: 'tnt-7',
-        productId: 'tickets',
-        tenantName: 'Acme Retail Group',
-        domain: 'acmeretail.com',
-        adminName: 'Jordan Lee',
-        adminEmail: 'j.lee@acmeretail.com',
-        planType: 'Standard',
-        subscriptionType: 'Monthly Billing',
-        status: 'Pending',
-        createdAt: '2026-05-19',
-        unitsManaged: 18,
-        licenseKey: 'TL9Q-8R7S-6T5U-4V3W',
-    },
-];
-
 /* ── Custom Dropdown Component with Rounded Border Radius ── */
 interface CustomSelectOption {
     value: string;
@@ -834,7 +733,7 @@ export default function TenantListPage() {
                                                                         {t.tenantName.charAt(0)}
                                                                     </div>
                                                                     <div>
-                                                                        <div className="font-bold text-primary text-sm hover:text-accent transition-colors">
+                                                                        <div className="font-bold text-primary text-sm hover:text-accent transition-colors truncate">
                                                                             {t.tenantName}
                                                                         </div>
                                                                         <div className="mt-1">

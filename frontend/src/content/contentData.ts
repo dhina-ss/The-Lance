@@ -154,8 +154,8 @@ export const contentData = {
       heading: "The people behind the work",
       subheading: "A small, senior team with deep expertise across the full stack.",
       members: [
-        { id: "m1", name: "Dhinakaran Sekar", role: "Senior Full-Stack Developer", bio: "5+ years building distributed systems at scale. Obsessed with clean architecture and fast feedback loops." },
-        { id: "m2", name: "Jaykumar A", role: "Senior Manager - Engineering", bio: "7+ years of experience in Engineering Management. Obsessed with building scalable and reliable systems." }
+        { id: "m1", name: "Jaykumar A", role: "Senior Manager - Engineering", bio: "7+ years of experience in Engineering Management. Obsessed with building scalable and reliable systems." },
+        { id: "m2", name: "Dhinakaran Sekar", role: "Senior Full-Stack Developer", bio: "5+ years building distributed systems at scale. Obsessed with clean architecture and fast feedback loops." }
       ]
     },
     cta: {

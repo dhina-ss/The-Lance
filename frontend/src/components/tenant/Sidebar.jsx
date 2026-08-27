@@ -59,7 +59,6 @@ export default function Sidebar({ activeTab: externalActiveTab, setActiveTab: ex
 			<div className="space-y-6">
 				{/* Brand Header */}
 				<div
-					onClick={() => navigate('/')}
 					className="flex flex-col gap-3 items-start group cursor-pointer"
 				>
 					<img
