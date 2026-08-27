@@ -1,9 +1,8 @@
 import React from 'react';
-import { Download } from 'lucide-react';
+import { Download, Loader2 } from 'lucide-react';
 
-export default function Header({ pageTitle = 'Dashboard Overview', onDownloadClick }) {
-  // Always route through the license-key modal (the download needs a key).
-  const handleDownload = () => onDownloadClick?.();
+export default function Header({ pageTitle = 'Dashboard Overview', onDownloadClick, downloading = false }) {
+  const handleDownload = () => { if (!downloading) onDownloadClick?.(); };
 
   return (
     <header className="sticky top-0 z-40 w-full bg-background/90 backdrop-blur-xl border-b border-border/80 px-6 lg:px-10 pb-4 pt-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -27,11 +26,12 @@ export default function Header({ pageTitle = 'Dashboard Overview', onDownloadCli
       <div className="flex items-center gap-3">
         <button
           onClick={handleDownload}
-          className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent/90 text-accent-foreground font-extrabold text-sm rounded-xl shadow-md shadow-accent/20 hover:shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0"
-          title="Download Product Setup Package"
+          disabled={downloading}
+          className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent/90 text-accent-foreground font-extrabold text-sm rounded-xl shadow-md shadow-accent/20 hover:shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 disabled:opacity-70 disabled:cursor-not-allowed disabled:active:scale-100"
+          title={downloading ? 'Preparing your download…' : 'Download Product Setup Package'}
         >
-          <Download size={16} />
-          <span>Download</span>
+          {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+          <span>{downloading ? 'Downloading…' : 'Download'}</span>
         </button>
       </div>
     </header>

@@ -171,7 +171,7 @@ export default function TenantDashboardPage() {
 					/>
 
 					{/* Top Header */}
-					<Header pageTitle={titleMap[activeTab] || 'Dashboard Overview'} onDownloadClick={handleDirectDownload} />
+					<Header pageTitle={titleMap[activeTab] || 'Dashboard Overview'} onDownloadClick={handleDirectDownload} downloading={downloading} />
 
 					{/* Download License Key Modal */}
 					<DownloadModal isOpen={isDownloadModalOpen} onClose={() => setIsDownloadModalOpen(false)} />
