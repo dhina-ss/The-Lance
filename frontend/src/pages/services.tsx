@@ -48,7 +48,7 @@ export default function ServicesPage() {
 
             <main>
                 {/* ── HERO ── */}
-                <section className="relative pt-32 pb-20 bg-background overflow-hidden">
+                <section className="relative pt-32 bg-background overflow-hidden">
                     {/* Grid dot background */}
                     <div
                         className="absolute inset-0 opacity-[0.04] pointer-events-none"
@@ -109,7 +109,7 @@ export default function ServicesPage() {
                             >
                                 {services.hero.heading}
                             </motion.h1>
-                            <motion.p variants={fadeUp} className="text-xl text-muted-foreground leading-relaxed">
+                            <motion.p variants={fadeUp} className="text-md text-muted-foreground leading-relaxed">
                                 {services.hero.subheading}
                             </motion.p>
                         </motion.div>
@@ -207,7 +207,7 @@ export default function ServicesPage() {
                             <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary tracking-tight mb-4">
                                 {services.process.heading}
                             </motion.h2>
-                            <motion.p variants={fadeUp} className="text-lg text-muted-foreground max-w-xl mx-auto">
+                            <motion.p variants={fadeUp} className="text-md text-muted-foreground max-w-xl mx-auto">
                                 {services.process.subheading}
                             </motion.p>
                         </motion.div>
@@ -264,7 +264,7 @@ export default function ServicesPage() {
                             <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary-foreground tracking-tight mb-4">
                                 {services.cta.heading}
                             </motion.h2>
-                            <motion.p variants={fadeUp} className="text-lg text-primary-foreground/70 mb-10 max-w-xl mx-auto">
+                            <motion.p variants={fadeUp} className="text-md text-primary-foreground/70 mb-10 max-w-xl mx-auto">
                                 {services.cta.subheading}
                             </motion.p>
                             <motion.div variants={fadeUp}>

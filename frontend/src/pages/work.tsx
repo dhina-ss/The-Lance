@@ -46,7 +46,7 @@ export default function WorkPage() {
 
             <main>
                 {/* ── HERO ── */}
-                <section className="relative pt-32 pb-20 bg-background overflow-hidden">
+                <section className="relative pt-32 bg-background overflow-hidden">
                     <div
                         className="absolute inset-0 opacity-[0.04] pointer-events-none"
                         style={{
@@ -106,7 +106,7 @@ export default function WorkPage() {
 
                                 {work.hero.heading}
                             </motion.h1>
-                            <motion.p variants={fadeUp} className="text-xl text-muted-foreground leading-relaxed">
+                            <motion.p variants={fadeUp} className="text-md text-muted-foreground leading-relaxed">
                                 {work.hero.subheading}
                             </motion.p>
                         </motion.div>
@@ -230,7 +230,7 @@ export default function WorkPage() {
                             <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary-foreground tracking-tight mb-4">
                                 {work.cta.heading}
                             </motion.h2>
-                            <motion.p variants={fadeUp} className="text-lg text-primary-foreground/70 mb-10 max-w-xl mx-auto">
+                            <motion.p variants={fadeUp} className="text-md text-primary-foreground/70 mb-10 max-w-xl mx-auto">
                                 {work.cta.subheading}
                             </motion.p>
                             <motion.div variants={fadeUp}>

@@ -108,7 +108,7 @@ export default function AboutPage() {
                             >
                                 {about.hero.heading}
                             </motion.h1>
-                            <motion.p variants={fadeUp} className="text-xl text-muted-foreground leading-relaxed">
+                            <motion.p variants={fadeUp} className="text-md text-muted-foreground leading-relaxed">
                                 {about.hero.subheading}
                             </motion.p>
                         </motion.div>
@@ -246,7 +246,7 @@ export default function AboutPage() {
                             <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary tracking-tight mb-4">
                                 {about.team.heading}
                             </motion.h2>
-                            <motion.p variants={fadeUp} className="text-lg text-muted-foreground max-w-xl">
+                            <motion.p variants={fadeUp} className="text-md text-muted-foreground max-w-xl">
                                 {about.team.subheading}
                             </motion.p>
                         </motion.div>
@@ -314,7 +314,7 @@ export default function AboutPage() {
                             <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary-foreground tracking-tight leading-tight mb-4">
                                 {about.cta.heading}
                             </motion.h2>
-                            <motion.p variants={fadeUp} className="text-lg text-primary-foreground/70 mb-10 leading-relaxed">
+                            <motion.p variants={fadeUp} className="text-md text-primary-foreground/70 mb-10 leading-relaxed">
                                 {about.cta.subheading}
                             </motion.p>
                             <motion.div variants={fadeUp}>

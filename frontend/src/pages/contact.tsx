@@ -99,7 +99,7 @@ export default function ContactPage() {
 
             <main>
                 {/* ── HERO ── */}
-                <section className="relative pt-32 pb-16 bg-background overflow-hidden">
+                <section className="relative pt-32 bg-background overflow-hidden">
                     <div
                         className="absolute inset-0 opacity-[0.04] pointer-events-none"
                         style={{
@@ -158,7 +158,7 @@ export default function ContactPage() {
                             >
                                 {contact.hero.heading}
                             </motion.h1>
-                            <motion.p variants={fadeUp} className="text-xl text-muted-foreground leading-relaxed">
+                            <motion.p variants={fadeUp} className="text-md text-muted-foreground leading-relaxed">
                                 {contact.hero.subheading}
                             </motion.p>
                         </motion.div>

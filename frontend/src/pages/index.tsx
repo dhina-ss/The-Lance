@@ -1,11 +1,41 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Helmet } from '@dr.pogodin/react-helmet';
 import { Link } from 'react-router-dom';
-import { motion } from 'motion/react';
-import { CheckCircle, Globe, Smartphone, Cloud, Code2, Quote, ChevronLeft, ChevronRight, Rocket, ShieldCheck } from 'lucide-react';
+import { motion, useInView, animate } from 'motion/react';
+import { CheckCircle, Globe, Smartphone, Cloud, Code2, Quote, Rocket, ShieldCheck } from 'lucide-react';
 import { home } from 'virtual:content';
 
 const serviceIcons = [Globe, Smartphone, Cloud, Code2];
+
+function AnimatedNumber({ value }: { value: string }) {
+    const ref = useRef<HTMLSpanElement>(null);
+    const isInView = useInView(ref, { once: true, margin: '-20px' });
+    const match = value.match(/^(\d+)(.*)$/);
+    const targetNum = match ? parseInt(match[1], 10) : 0;
+    const suffix = match ? match[2] : value;
+
+    const [currentCount, setCurrentCount] = useState(0);
+
+    useEffect(() => {
+        if (!isInView || targetNum === 0) return;
+
+        const controls = animate(0, targetNum, {
+            duration: 2.5,
+            ease: [0.16, 1, 0.3, 1],
+            onUpdate(val) {
+                setCurrentCount(Math.round(val));
+            },
+        });
+
+        return () => controls.stop();
+    }, [isInView, targetNum]);
+
+    return (
+        <span ref={ref}>
+            {match ? `${currentCount}${suffix}` : value}
+        </span>
+    );
+}
 
 const fadeUp = {
     hidden: { opacity: 0, y: 24 },
@@ -127,7 +157,7 @@ export default function HomePage() {
 
                                 <motion.p
                                     variants={fadeUp}
-                                    className="text-lg text-muted-foreground leading-relaxed max-w-lg mb-10"
+                                    className="text-md text-muted-foreground leading-relaxed max-w-lg mb-10"
                                 >
                                     {home.hero.subheadline}
                                 </motion.p>
@@ -140,7 +170,7 @@ export default function HomePage() {
                                         {home.hero.cta_primary}
                                     </Link>
                                     <Link
-                                        to="/work"
+                                        to="/services"
                                         className="px-7 py-3.5 border border-primary text-primary font-semibold text-sm tracking-wide rounded transition-all duration-200 hover:bg-primary hover:text-primary-foreground"
                                     >
                                         {home.hero.cta_secondary}
@@ -183,13 +213,28 @@ export default function HomePage() {
                                         initial={{ opacity: 0, x: -40, y: -30 }}
                                         animate={{ opacity: 1, x: 0, y: 0 }}
                                         transition={{ duration: 0.7, ease: 'easeOut', delay: 0.4 }}
-                                        className="absolute -top-2 left-2 bg-background/80 backdrop-blur-md border border-emerald-500/30 p-3 px-4 rounded-2xl shadow-xl z-20 flex items-center gap-3"
+                                        className="absolute -top-2 left-2 z-20"
                                     >
-                                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shadow-sm shadow-emerald-500/50" />
-                                        <div>
-                                            <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">System Status</p>
-                                            <p className="text-xs font-bold text-primary">99.9% Production Ready</p>
-                                        </div>
+                                        <motion.div
+                                            animate={{
+                                                y: [0, -10, 0, 6, 0],
+                                                x: [0, 4, 0, -4, 0],
+                                                rotate: [0, 1.5, 0, -1.5, 0],
+                                            }}
+                                            transition={{
+                                                duration: 5.5,
+                                                repeat: Infinity,
+                                                ease: 'easeInOut',
+                                            }}
+                                            whileHover={{ scale: 1.06, y: -4 }}
+                                            className="bg-background/80 backdrop-blur-md border border-emerald-500/30 p-3 px-4 rounded-2xl shadow-xl flex items-center gap-3 cursor-pointer hover:border-emerald-500/60 hover:shadow-emerald-500/10 transition-colors"
+                                        >
+                                            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shadow-sm shadow-emerald-500/50" />
+                                            <div>
+                                                <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">System Status</p>
+                                                <p className="text-xs font-bold text-primary">99.9% Production Ready</p>
+                                            </div>
+                                        </motion.div>
                                     </motion.div>
 
                                     {/* 2. Top-Right Glass Card: Code Snippet */}
@@ -197,17 +242,33 @@ export default function HomePage() {
                                         initial={{ opacity: 0, x: 40, y: -30 }}
                                         animate={{ opacity: 1, x: 0, y: 0 }}
                                         transition={{ duration: 0.7, ease: 'easeOut', delay: 0.5 }}
-                                        className="absolute top-6 -right-6 bg-primary/95 text-primary-foreground p-3.5 px-4 rounded-2xl shadow-2xl z-20 border border-white/10 backdrop-blur-md max-w-[210px]"
+                                        className="absolute top-6 -right-6 z-20"
                                     >
-                                        <div className="flex items-center gap-1.5 mb-2 border-b border-white/10 pb-1.5">
-                                            <div className="w-2 h-2 rounded-full bg-rose-400" />
-                                            <div className="w-2 h-2 rounded-full bg-amber-400" />
-                                            <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                                            <span className="text-[10px] font-mono opacity-50 ml-1">app.config.ts</span>
-                                        </div>
-                                        <p className="font-mono text-[11px] leading-relaxed">
-                                            <span className="text-accent">const</span> studio = <span className="text-emerald-400">'The Lance'</span>;
-                                        </p>
+                                        <motion.div
+                                            animate={{
+                                                y: [0, 8, 0, -10, 0],
+                                                x: [0, -5, 0, 5, 0],
+                                                rotate: [0, -2, 0, 2, 0],
+                                            }}
+                                            transition={{
+                                                duration: 6.2,
+                                                repeat: Infinity,
+                                                ease: 'easeInOut',
+                                                delay: 0.3,
+                                            }}
+                                            whileHover={{ scale: 1.06, y: -4 }}
+                                            className="bg-primary/95 text-primary-foreground p-3.5 px-4 rounded-2xl shadow-2xl border border-white/10 backdrop-blur-md max-w-[210px] cursor-pointer hover:border-white/20 transition-colors"
+                                        >
+                                            <div className="flex items-center gap-1.5 mb-2 border-b border-white/10 pb-1.5">
+                                                <div className="w-2 h-2 rounded-full bg-rose-400" />
+                                                <div className="w-2 h-2 rounded-full bg-amber-400" />
+                                                <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                                                <span className="text-[10px] font-mono opacity-50 ml-1">app.config.ts</span>
+                                            </div>
+                                            <p className="font-mono text-[11px] leading-relaxed">
+                                                <span className="text-accent">const</span> studio = <span className="text-emerald-400">'The Lance'</span>;
+                                            </p>
+                                        </motion.div>
                                     </motion.div>
 
                                     {/* 3. Bottom-Left Glass Card: Fast Delivery */}
@@ -215,15 +276,35 @@ export default function HomePage() {
                                         initial={{ opacity: 0, x: -40, y: 30 }}
                                         animate={{ opacity: 1, x: 0, y: 0 }}
                                         transition={{ duration: 0.7, ease: 'easeOut', delay: 0.6 }}
-                                        className="absolute bottom-6 -left-6 bg-background/85 backdrop-blur-md border border-accent/30 p-3 px-4 rounded-2xl shadow-xl z-20 flex items-center gap-3"
+                                        className="absolute bottom-6 -left-6 z-20"
                                     >
-                                        <div className="w-9 h-9 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0">
-                                            <Rocket size={18} />
-                                        </div>
-                                        <div>
-                                            <p className="text-xs font-bold text-primary">Agile Sprints</p>
-                                            <p className="text-[10px] text-muted-foreground">Rapid Deployment</p>
-                                        </div>
+                                        <motion.div
+                                            animate={{
+                                                y: [0, -8, 0, 10, 0],
+                                                x: [0, 6, 0, -3, 0],
+                                                rotate: [0, -1, 0, 1.5, 0],
+                                            }}
+                                            transition={{
+                                                duration: 5.8,
+                                                repeat: Infinity,
+                                                ease: 'easeInOut',
+                                                delay: 0.5,
+                                            }}
+                                            whileHover={{ scale: 1.06, y: -4 }}
+                                            className="bg-background/85 backdrop-blur-md border border-accent/30 p-3 px-4 rounded-2xl shadow-xl flex items-center gap-3 cursor-pointer hover:border-accent/60 hover:shadow-accent/10 transition-colors"
+                                        >
+                                            <motion.div
+                                                animate={{ y: [0, -2, 0] }}
+                                                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                                                className="w-9 h-9 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0"
+                                            >
+                                                <Rocket size={18} />
+                                            </motion.div>
+                                            <div>
+                                                <p className="text-xs font-bold text-primary">Agile Sprints</p>
+                                                <p className="text-[10px] text-muted-foreground">Rapid Deployment</p>
+                                            </div>
+                                        </motion.div>
                                     </motion.div>
 
                                     {/* 4. Bottom-Right Glass Card: Senior Engineers */}
@@ -231,15 +312,31 @@ export default function HomePage() {
                                         initial={{ opacity: 0, x: 40, y: 30 }}
                                         animate={{ opacity: 1, x: 0, y: 0 }}
                                         transition={{ duration: 0.7, ease: 'easeOut', delay: 0.7 }}
-                                        className="absolute -bottom-2 right-2 bg-background/85 backdrop-blur-md border border-primary/15 p-3 px-4 rounded-2xl shadow-xl z-20 flex items-center gap-3"
+                                        className="absolute -bottom-2 right-2 z-20"
                                     >
-                                        <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
-                                            <ShieldCheck size={18} />
-                                        </div>
-                                        <div>
-                                            <p className="text-xs font-bold text-primary">Senior Talent Only</p>
-                                            <p className="text-[10px] text-muted-foreground">Clean Architecture</p>
-                                        </div>
+                                        <motion.div
+                                            animate={{
+                                                y: [0, 10, 0, -6, 0],
+                                                x: [0, -4, 0, 4, 0],
+                                                rotate: [0, 2, 0, -1, 0],
+                                            }}
+                                            transition={{
+                                                duration: 6.5,
+                                                repeat: Infinity,
+                                                ease: 'easeInOut',
+                                                delay: 0.2,
+                                            }}
+                                            whileHover={{ scale: 1.06, y: -4 }}
+                                            className="bg-background/85 backdrop-blur-md border border-primary/15 p-3 px-4 rounded-2xl shadow-xl flex items-center gap-3 cursor-pointer hover:border-primary/40 hover:shadow-primary/10 transition-colors"
+                                        >
+                                            <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
+                                                <ShieldCheck size={18} />
+                                            </div>
+                                            <div>
+                                                <p className="text-xs font-bold text-primary">Senior Talent Only</p>
+                                                <p className="text-[10px] text-muted-foreground">Clean Architecture</p>
+                                            </div>
+                                        </motion.div>
                                     </motion.div>
 
                                     {/* Central Logo Glassmorphic Card */}
@@ -247,13 +344,27 @@ export default function HomePage() {
                                         initial={{ opacity: 0, scale: 0.4, rotate: -6 }}
                                         animate={{ opacity: 1, scale: 1, rotate: 0 }}
                                         transition={{ duration: 0.7, ease: [0.175, 0.885, 0.32, 1.275], delay: 0.3 }}
-                                        className="w-28 h-28 rounded-3xl bg-white/90 backdrop-blur-xl flex items-center justify-center shadow-2xl z-10 border border-accent/30 p-5 ring-1 ring-black/5"
+                                        className="z-10"
                                     >
-                                        <img
-                                            src="/assets/images/logo/logo.png"
-                                            alt="The Lance Logo Icon"
-                                            className="h-20 w-auto object-contain drop-shadow"
-                                        />
+                                        <motion.div
+                                            animate={{
+                                                y: [0, -5, 0, 5, 0],
+                                                scale: [1, 1.03, 1, 0.98, 1],
+                                            }}
+                                            transition={{
+                                                duration: 5,
+                                                repeat: Infinity,
+                                                ease: 'easeInOut',
+                                            }}
+                                            whileHover={{ scale: 1.1, rotate: 3 }}
+                                            className="w-28 h-28 rounded-3xl bg-white/90 backdrop-blur-xl flex items-center justify-center shadow-2xl border border-accent/30 p-5 ring-1 ring-black/5 cursor-pointer"
+                                        >
+                                            <img
+                                                src="/assets/images/logo/logo.png"
+                                                alt="The Lance Logo Icon"
+                                                className="h-20 w-auto object-contain drop-shadow"
+                                            />
+                                        </motion.div>
                                     </motion.div>
                                 </motion.div>
                             </div>
@@ -262,13 +373,16 @@ export default function HomePage() {
                         {/* Stats row */}
                         <motion.div
                             initial="hidden"
-                            animate="visible"
+                            whileInView="visible"
+                            viewport={{ once: true }}
                             variants={stagger}
                             className="mt-20 pt-10 border-t border-border grid grid-cols-2 md:grid-cols-4 gap-8"
                         >
                             {home.stats.map((stat) => (
                                 <motion.div key={stat.id} variants={fadeUp} className="text-center md:text-left">
-                                    <div className="text-4xl font-bold text-primary tracking-tight">{stat.value}</div>
+                                    <div className="text-4xl font-bold text-primary tracking-tight">
+                                        <AnimatedNumber value={stat.value} />
+                                    </div>
                                     <div className="text-sm text-muted-foreground mt-1 tracking-wide">{stat.label}</div>
                                 </motion.div>
                             ))}
@@ -293,7 +407,7 @@ export default function HomePage() {
                             <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary tracking-tight mb-4">
                                 {home.services.heading}
                             </motion.h2>
-                            <motion.p variants={fadeUp} className="text-lg text-muted-foreground max-w-xl">
+                            <motion.p variants={fadeUp} className="text-md text-muted-foreground max-w-xl">
                                 {home.services.subheading}
                             </motion.p>
                         </motion.div>
@@ -353,7 +467,7 @@ export default function HomePage() {
                                     {home.about.heading}
                                 </motion.h2>
                                 {home.about.body.map((p) => (
-                                    <motion.p key={p.id} variants={fadeUp} className="text-lg text-muted-foreground leading-relaxed">
+                                    <motion.p key={p.id} variants={fadeUp} className="text-md text-muted-foreground leading-relaxed">
                                         {p.text}
                                     </motion.p>
                                 ))}
@@ -406,7 +520,7 @@ export default function HomePage() {
                                 <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary tracking-tight mb-4">
                                     {home.testimonials.heading}
                                 </motion.h2>
-                                <motion.p variants={fadeUp} className="text-lg text-muted-foreground">
+                                <motion.p variants={fadeUp} className="text-md text-muted-foreground">
                                     {home.testimonials.subheading}
                                 </motion.p>
                             </motion.div>
@@ -547,7 +661,7 @@ export default function HomePage() {
                             <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl lg:text-6xl font-bold text-primary-foreground tracking-tight leading-tight mb-6">
                                 {home.cta.heading}
                             </motion.h2>
-                            <motion.p variants={fadeUp} className="text-lg text-primary-foreground/70 mb-10 leading-relaxed">
+                            <motion.p variants={fadeUp} className="text-md text-primary-foreground/70 mb-10 leading-relaxed">
                                 {home.cta.subheading}
                             </motion.p>
                             <motion.div variants={fadeUp}>
