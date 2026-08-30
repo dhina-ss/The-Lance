@@ -1699,6 +1699,39 @@ def get_overview():
                                'severity': _sev_label(r[2]), 'detectedAt': to_iso(r[3]),
                                'device': r[5] or 'Unknown device', 'remediated': bool(r[4])})
 
+        # --- Antivirus (Windows Defender) protection summary ---
+        cur.execute('SELECT COUNT(*), '
+                    'COUNT(*) FILTER (WHERE "DefenderRealtimeProtectionEnabled" IS TRUE '
+                    '   AND "DefenderAntivirusEnabled" IS TRUE '
+                    '   AND COALESCE("DefenderSignatureAgeDays", 999) <= 7) '
+                    'FROM devices;')
+        total_dev, protected_dev = cur.fetchone()
+        total_dev = total_dev or 0
+        protected_dev = protected_dev or 0
+        threats_removed = 0
+        active_threats = 0
+        cur.execute("SELECT to_regclass('public.device_threats');")
+        if cur.fetchone()[0] is not None:
+            cur.execute('SELECT COUNT(*) FILTER (WHERE COALESCE(remediated, false) IS TRUE), '
+                        'COUNT(*) FILTER (WHERE COALESCE(remediated, false) IS FALSE) '
+                        'FROM device_threats;')
+            threats_removed, active_threats = cur.fetchone()
+        if total_dev == 0:
+            av_status = 'No Devices'
+        elif active_threats > 0:
+            av_status = 'At Risk'
+        elif protected_dev < total_dev:
+            av_status = 'At Risk'
+        else:
+            av_status = 'Protected'
+        antivirus = {
+            'status': av_status,
+            'totalDevices': total_dev,
+            'protectedDevices': protected_dev,
+            'threatsRemoved': threats_removed or 0,
+            'activeThreats': active_threats or 0,
+        }
+
         cur.close()
         conn.close()
         return jsonify({
@@ -1706,6 +1739,7 @@ def get_overview():
             'performance': performance,
             'activity': activity,
             'alerts': alerts,
+            'antivirus': antivirus,
         }), 200
     except Exception as e:
         import traceback

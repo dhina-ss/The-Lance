@@ -10,6 +10,7 @@ import PerformanceMatrix from '../components/tenant/PerformanceMatrix';
 import OsDistribution from '../components/tenant/OsDistribution';
 import ActivityLog from '../components/tenant/ActivityLog';
 import CriticalAlerts from '../components/tenant/CriticalAlerts';
+import AntivirusStatus from '../components/tenant/AntivirusStatus';
 import DevicesPage from '../components/tenant/DevicesPage';
 import UsersPage from '../components/tenant/UsersPage';
 import { fetchDevices, fetchOverview } from '../api/ems';
@@ -48,7 +49,7 @@ export default function TenantDashboardPage() {
 	const [activeTab, setActiveTab] = useState('dashboard');
 	const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 	const [stats, setStats] = useState({ total: 0, online: 0, sleep: 0, offline: 0 });
-	const [overview, setOverview] = useState<{ osDistribution: any[]; performance: any[]; activity: any[]; alerts: any[] }>({ osDistribution: [], performance: [], activity: [], alerts: [] });
+	const [overview, setOverview] = useState<{ osDistribution: any[]; performance: any[]; activity: any[]; alerts: any[]; antivirus: any }>({ osDistribution: [], performance: [], activity: [], alerts: [], antivirus: null });
 	const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
 
 	const handleNavigateToDevice = (deviceId: string) => {
@@ -121,6 +122,7 @@ export default function TenantDashboardPage() {
 					performance: ov.performance || [],
 					activity: ov.activity || [],
 					alerts: ov.alerts || [],
+					antivirus: ov.antivirus || null,
 				});
 			} catch {
 				// Overview panels are best-effort
@@ -155,7 +157,7 @@ export default function TenantDashboardPage() {
 				<link rel="canonical" href={`${site}/tenant-dashboard`} />
 			</Helmet>
 
-			<div className="relative min-h-screen bg-background flex flex-col lg:flex-row overflow-hidden">
+			<div className="relative min-h-screen bg-background flex flex-col lg:flex-row overflow-hidden dashboard-page">
 				{/* Sidebar Component */}
 				<Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onDownloadClick={handleDirectDownload} />
 
@@ -272,6 +274,11 @@ export default function TenantDashboardPage() {
 										timeframe="Not reachable"
 									/>
 								</motion.section>
+
+								{/* Antivirus Protection status */}
+								<motion.div variants={fadeUp} className="grid grid-cols-12 gap-6">
+									<AntivirusStatus data={overview.antivirus} />
+								</motion.div>
 
 								{/* Main Charts & Grid Area */}
 								<motion.div variants={fadeUp} className="grid grid-cols-12 gap-6">
