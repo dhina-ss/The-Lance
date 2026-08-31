@@ -289,6 +289,7 @@ export default function UsersPage({ onNavigateToDevice }) {
 	const [loading, setLoading] = useState(true);
 	const [loadError, setLoadError] = useState(null);
 	const [searchTerm, setSearchTerm] = useState('');
+	const [userTypeFilter, setUserTypeFilter] = useState('All');
 	const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
 
 	// Tenant Roles configuration state (5 roles: Super Admin, Admin, Role 1, Role 2, Role 3)
@@ -555,10 +556,11 @@ export default function UsersPage({ onNavigateToDevice }) {
 
 	const filteredUsers = users.filter((u) => {
 		const term = searchTerm.toLowerCase();
-		return (
+		const matchesSearch =
 			!term ||
-			[u.name, u.email, u.empCode, u.type, u.role, u.deviceId, u.deviceName].filter(Boolean).some((v) => v.toLowerCase().includes(term))
-		);
+			[u.name, u.email, u.empCode, u.type, u.role, u.deviceId, u.deviceName].filter(Boolean).some((v) => v.toLowerCase().includes(term));
+		const matchesType = userTypeFilter === 'All' || !userTypeFilter || u.type === userTypeFilter;
+		return matchesSearch && matchesType;
 	});
 
 	const totalCount = users.length;
@@ -622,9 +624,22 @@ export default function UsersPage({ onNavigateToDevice }) {
 						</div>
 					</div>
 
-					<div className="relative w-full lg:max-w-xs">
-						<Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={16} />
-						<input type="text" placeholder="Search name, email, type, emp code..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-background border border-input rounded-xl pl-9 pr-4 py-2 text-xs font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all" />
+					<div className="flex flex-col sm:flex-row items-center gap-3">
+						<div className="relative w-full sm:w-72">
+							<Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={16} />
+							<input type="text" placeholder="Search name, email, type, emp code..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-background border border-input rounded-xl pl-9 pr-4 py-2 text-xs font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all h-[38px]" />
+						</div>
+						<div className="w-full sm:w-48">
+							<CustomSelect
+								value={userTypeFilter}
+								onChange={setUserTypeFilter}
+								options={[
+									{ value: 'All', label: 'All User Types' },
+									{ value: 'Dashboard User', label: 'Dashboard User' },
+									{ value: 'Device User', label: 'Device User' },
+								]}
+							/>
+						</div>
 					</div>
 				</div>
 
@@ -739,7 +754,7 @@ export default function UsersPage({ onNavigateToDevice }) {
 			{/* Register Modal */}
 			{isRegisterModalOpen && ReactDOM.createPortal(
 				<div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-					<div className="bg-background border border-border/80 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+					<div className="bg-background border border-border/80 rounded-2xl p-6 max-w-xl w-full shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
 						<div className="flex justify-between items-center border-b border-border/60 pb-4">
 							<div className="flex items-center gap-3">
 								<div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold">
@@ -815,10 +830,14 @@ export default function UsersPage({ onNavigateToDevice }) {
 										? 'Dashboard users have portal access with assigned roles & permission rules.'
 										: 'Device users are assigned directly to endpoints without administrative portal access.'}
 								</p>
-								{newType === 'Device User' && (
-									<CustomSelect label="Assign Manager (optional)" value={newManagerId} onChange={setNewManagerId} options={managerOptions} description="The dashboard user emailed if this user's device stays idle." />
-								)}
-								<FormField label="Username" required value={newUsername} onChange={setNewUsername} placeholder="e.g. john.doe" />
+								<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+									<div className={newType === 'Device User' ? '' : 'sm:col-span-2'}>
+										<FormField label="Username" required value={newUsername} onChange={setNewUsername} placeholder="e.g. john.doe" />
+									</div>
+									{newType === 'Device User' && (
+										<CustomSelect label="Assign Manager (optional)" value={newManagerId} onChange={setNewManagerId} options={managerOptions} />
+									)}
+								</div>
 								<FormField label="Email Address" required type="email" value={newEmail} onChange={setNewEmail} placeholder="e.g. john.doe@enterprise.com" />
 								<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 									<FormField label="Password" required type="password" minLength={8} value={newPassword} onChange={(v) => { setNewPassword(v); if (formError) setFormError(''); }} placeholder="At least 8 characters" />
@@ -829,7 +848,7 @@ export default function UsersPage({ onNavigateToDevice }) {
 								<div className="flex items-center justify-end gap-3 pt-3 border-t border-border/60">
 									<button type="button" onClick={() => { setIsRegisterModalOpen(false); resetForm(); }} className="px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-slate-100 rounded-xl cursor-pointer">Cancel</button>
 									<button type="submit" className="px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-sm hover:bg-accent hover:text-accent-foreground cursor-pointer transition-all">
-										{newType === 'Dashboard User' ? 'Next: Select Role →' : 'Register User'}
+										{newType === 'Dashboard User' ? 'Next: Select Role' : 'Register User'}
 									</button>
 								</div>
 							</form>
@@ -988,7 +1007,14 @@ export default function UsersPage({ onNavigateToDevice }) {
 									]}
 								/>
 							</div>
-							<FormField label="Username" required value={editUsername} onChange={setEditUsername} placeholder="e.g. john.doe" />
+							<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+								<div className={editType === 'Device User' ? '' : 'sm:col-span-2'}>
+									<FormField label="Username" required value={editUsername} onChange={setEditUsername} placeholder="e.g. john.doe" />
+								</div>
+								{editType === 'Device User' && (
+									<CustomSelect label="Assign Manager (optional)" value={editManagerId} onChange={setEditManagerId} options={managerOptions} description="The dashboard user emailed if this user's device stays idle." />
+								)}
+							</div>
 
 							{editType === 'Dashboard User' && (
 								<>
@@ -1082,9 +1108,6 @@ export default function UsersPage({ onNavigateToDevice }) {
 								</>
 							)}
 
-							{editType === 'Device User' && (
-								<CustomSelect label="Assign Manager (optional)" value={editManagerId} onChange={setEditManagerId} options={managerOptions} description="The dashboard user emailed if this user's device stays idle." />
-							)}
 							<FormField label="Email Address" required type="email" value={editEmail} onChange={setEditEmail} placeholder="e.g. john.doe@enterprise.com" />
 							<FormField label="New Password" type="password" minLength={8} value={editPassword} onChange={(v) => { setEditPassword(v); if (editError) setEditError(''); }} placeholder="Leave blank or enter at least 8 characters" />
 							{editError && <p className="text-xs text-rose-500 font-semibold">{editError}</p>}
@@ -1358,7 +1381,7 @@ function CustomSelect({ label, required, value, onChange, options, description }
 									onChange(opt.value);
 									setIsOpen(false);
 								}}
-								className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
+								className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
 									isSelected
 										? 'bg-primary text-primary-foreground font-bold shadow-xs'
 										: 'text-muted-foreground hover:text-primary hover:bg-slate-100'
