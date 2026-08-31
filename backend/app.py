@@ -790,6 +790,25 @@ def reverse_geocode(lat, lon):
         return None, None, None
 
 
+def ip_geolocate(ip):
+    """Public IP -> (city, region, country) via ip-api.com. A server-friendly
+    fallback for reverse geocoding, since Nominatim rate-limits/blocks the
+    datacenter IPs our backend runs on. Free tier, no key, HTTP only."""
+    import urllib.request
+    if not ip:
+        return None, None, None
+    try:
+        url = f'http://ip-api.com/json/{ip}?fields=status,city,regionName,country'
+        req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode())
+        if data.get('status') == 'success':
+            return data.get('city'), data.get('regionName'), data.get('country')
+    except Exception as e:
+        print(f'ip_geolocate failed: {e}')
+    return None, None, None
+
+
 def client_public_ip():
     """The caller's public IP: leftmost X-Forwarded-For, else remote_addr.
     Returns None for private/loopback addresses (e.g. local testing)."""
@@ -939,6 +958,19 @@ def device_heartbeat():
             '"PublicIPAddress"=COALESCE(%s,"PublicIPAddress"), "SuspendedAt"=NULL '
             'WHERE "DeviceId"=%s;',
             (data.get('ipAddress'), data.get('username'), public_ip, device_id))
+
+        # City/region/country from the public IP, once, when we don't already
+        # have a location for this device (GPS reverse-geocode fills GpsCity when
+        # it can; this covers the common case where that is unavailable).
+        if public_ip:
+            cur.execute('SELECT "LocationCity", "GpsCity" FROM devices WHERE "DeviceId"=%s;', (device_id,))
+            loc = cur.fetchone()
+            if loc and not (loc[0] or loc[1]):
+                gcity, gregion, gcountry = ip_geolocate(public_ip)
+                if gcity or gcountry:
+                    cur.execute('UPDATE devices SET "LocationCity"=%s, '
+                                '"LocationRegion"=COALESCE("LocationRegion",%s), "LocationCountry"=%s '
+                                'WHERE "DeviceId"=%s;', (gcity, gregion, gcountry, device_id))
 
         # Auto-expire timed USB blocking.
         cur.execute('UPDATE devices SET "UsbBlockingEnabled"=false, "UsbBlockingUntil"=NULL '
