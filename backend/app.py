@@ -939,13 +939,28 @@ def client_public_ip():
         return None
 
 
-def compute_status(last_heartbeat, suspended_at):
-    """Online if a heartbeat arrived < 3 min ago; Sleep if suspended; else Offline."""
+# The device counts as "locked" (Sleep) while its LockedAt has been refreshed
+# within this window. The agent re-sends the idle-lock beacon while the screen
+# stays auto-locked; once the user unlocks it stops, LockedAt goes stale, and the
+# status returns to Online on its own - no separate unlock signal needed.
+LOCK_FRESH_SECONDS = 45
+
+
+def compute_status(last_heartbeat, suspended_at, locked_at=None):
+    """Online if a heartbeat arrived < 3 min ago; Sleep if the screen is auto-
+    locked or the device is suspended; else Offline."""
     import datetime
+    now = datetime.datetime.now(datetime.timezone.utc)
     if last_heartbeat is not None:
         try:
-            age = (datetime.datetime.now(datetime.timezone.utc) - last_heartbeat).total_seconds()
-            if age < 180:
+            if (now - last_heartbeat).total_seconds() < 180:
+                # On and heartbeating - but an auto-locked screen shows as Sleep.
+                if locked_at is not None:
+                    try:
+                        if (now - locked_at).total_seconds() < LOCK_FRESH_SECONDS:
+                            return 'Sleep'
+                    except Exception:
+                        pass
                 return 'Online'
         except Exception:
             pass
@@ -1294,15 +1309,27 @@ def report_power_state():
 
 @app.route('/api/devices/idle-lock', methods=['POST'])
 def report_idle_lock():
-    """Agent beacon: the workstation was auto-locked after inactivity. Records a
-    'lock' session event for the device's login-log timeline."""
+    """Agent beacon: the workstation is auto-locked after inactivity. Sets the
+    LockedAt marker so the device shows as Sleep (the agent re-sends this while
+    the screen stays locked to keep it fresh). Records the 'lock' session event
+    only on the first beacon of a lock (dedup via the freshness window), so a
+    long lock produces a single timeline entry, not one per refresh."""
     device_id = (request.headers.get('X-Device-Id') or '').strip()
     if not device_id:
         return jsonify({'error': 'device id required'}), 400
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        record_session_event(cur, device_id, 'lock')
+        # Was the device already fresh-locked? If so this is just a refresh.
+        cur.execute('SELECT "LockedAt" FROM devices WHERE "DeviceId"=%s;', (device_id,))
+        row = cur.fetchone()
+        import datetime
+        already_locked = bool(
+            row and row[0] is not None
+            and (datetime.datetime.now(datetime.timezone.utc) - row[0]).total_seconds() < LOCK_FRESH_SECONDS)
+        cur.execute('UPDATE devices SET "LockedAt"=CURRENT_TIMESTAMP WHERE "DeviceId"=%s;', (device_id,))
+        if not already_locked:
+            record_session_event(cur, device_id, 'lock')
         conn.commit()
         cur.close()
         conn.close()
@@ -1681,7 +1708,7 @@ def get_devices():
                 'defenderSignatureAgeDays': r.get('DefenderSignatureAgeDays'),
                 'defenderSignatureVersion': r.get('DefenderSignatureVersion'),
                 'securityStatusUpdatedAt': to_iso(r.get('SecurityStatusUpdatedAt')),
-                'status': compute_status(r.get('LastHeartbeatTime'), r.get('SuspendedAt'))
+                'status': compute_status(r.get('LastHeartbeatTime'), r.get('SuspendedAt'), r.get('LockedAt'))
             })
         return jsonify(devices), 200
     except Exception as e:
@@ -1697,16 +1724,9 @@ def get_device_metrics(device_id):
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         # Live status from heartbeat recency (online < 3 min, sleep if suspended).
-        cur.execute('SELECT "LastHeartbeatTime","SuspendedAt" FROM devices WHERE "DeviceId"=%s OR "Id"::text=%s;', (key, str(device_id)))
+        cur.execute('SELECT "LastHeartbeatTime","SuspendedAt","LockedAt" FROM devices WHERE "DeviceId"=%s OR "Id"::text=%s;', (key, str(device_id)))
         d = cur.fetchone()
-        status = 'Offline'
-        if d and d['LastHeartbeatTime']:
-            import datetime
-            age = (datetime.datetime.now(datetime.timezone.utc) - d['LastHeartbeatTime']).total_seconds()
-            if age < 180:
-                status = 'Online'
-            elif d['SuspendedAt']:
-                status = 'Sleep'
+        status = compute_status(d['LastHeartbeatTime'], d['SuspendedAt'], d['LockedAt']) if d else 'Offline'
         cur.execute('SELECT * FROM device_metrics WHERE device_id=%s;', (key,))
         m = cur.fetchone()
         cur.close()
