@@ -255,7 +255,7 @@ export default function TenantDashboardPage() {
 										timeframe="Real-time heartbeat"
 									/>
 									<MetricCard
-										title="Suspended / Sleep"
+										title="Locked / Sleep"
 										value={String(stats.sleep)}
 										icon="bedtime"
 										iconBgColor="bg-amber-500/10"

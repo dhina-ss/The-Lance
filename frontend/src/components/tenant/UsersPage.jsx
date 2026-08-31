@@ -624,12 +624,12 @@ export default function UsersPage({ onNavigateToDevice }) {
 						</div>
 					</div>
 
-					<div className="flex flex-col sm:flex-row items-center gap-3">
-						<div className="relative w-full sm:w-72">
+					<div className="flex flex-col sm:flex-row items-center justify-between gap-3 w-full">
+						<div className="relative flex-1 w-full">
 							<Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={16} />
 							<input type="text" placeholder="Search name, email, type, emp code..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-background border border-input rounded-xl pl-9 pr-4 py-2 text-xs font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all h-[38px]" />
 						</div>
-						<div className="w-full sm:w-48">
+						<div className="w-full sm:w-52 shrink-0">
 							<CustomSelect
 								value={userTypeFilter}
 								onChange={setUserTypeFilter}
@@ -644,18 +644,18 @@ export default function UsersPage({ onNavigateToDevice }) {
 				</div>
 
 				<div className="overflow-x-auto min-h-[450px]">
-					<table className="w-full text-left border-collapse">
+					<table className="w-full min-w-full text-left border-collapse">
 						<thead className="border-b border-border/60 text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground bg-slate-100/80">
 							<tr>
-								<th className="px-6 py-3.5 w-14 text-center">#</th>
-								<th className="px-6 py-3.5">User</th>
-								<th className="px-6 py-3.5">Emp Code</th>
-								<th className="px-6 py-3.5">User Type</th>
-								<th className="px-6 py-3.5">Email</th>
-								<th className="px-6 py-3.5">Device Name</th>
-								<th className="px-6 py-3.5 text-center">Status</th>
-								<th className="px-6 py-3.5">Registered</th>
-								<th className="px-6 py-3.5 text-right">Actions</th>
+								<th className="px-6 py-3.5 w-12 text-center">#</th>
+								<th className="px-6 py-3.5 w-[18%]">User</th>
+								<th className="px-6 py-3.5 w-[12%]">Emp Code</th>
+								<th className="px-6 py-3.5 w-[14%]">User Type</th>
+								<th className="px-6 py-3.5 w-[22%]">Email</th>
+								<th className="px-6 py-3.5 w-[13%]">Device Name</th>
+								<th className="px-6 py-3.5 w-[11%] text-center">Status</th>
+								<th className="px-6 py-3.5 w-[10%]">Registered</th>
+								<th className="px-6 py-3.5 text-right w-20">Actions</th>
 							</tr>
 						</thead>
 						<tbody className="divide-y divide-border/40 text-xs">
