@@ -225,13 +225,29 @@ def auth_login():
             conn = get_db_connection()
             cur = conn.cursor()
             cur.execute(
-                'SELECT "Id", "Username", "Email", "PasswordHash" FROM app_users '
+                'SELECT "Id", "Username", "Email", "PasswordHash", "DeviceId" FROM app_users '
                 'WHERE LOWER("EmployeeCode") = LOWER(%s) '
                 '   OR LOWER("Email") = LOWER(%s) '
                 '   OR LOWER("Username") = LOWER(%s) LIMIT 1;',
                 (employee_code, employee_code, employee_code))
             row = cur.fetchone()
             if row and (row[3] or '') == password:
+                # One device per user: if this account is already active on a
+                # different device that still exists, refuse the activation.
+                bound_device = row[4]
+                if bound_device and device_id and bound_device != device_id:
+                    cur.execute('SELECT "DeviceName" FROM devices WHERE "DeviceId" = %s;', (bound_device,))
+                    other = cur.fetchone()
+                    if other:
+                        cur.close()
+                        conn.close()
+                        other_name = other[0] or 'another device'
+                        return jsonify({
+                            'success': False,
+                            'message': f'This account is already active on {other_name}. '
+                                       'A user can be signed in on only one device. Contact your '
+                                       'administrator to release the other device first.',
+                        }), 200
                 # Device sign-in -> session log (login at ...).
                 record_session_event(cur, device_id, 'login', row[1])
                 conn.commit()
@@ -967,8 +983,14 @@ def register_device():
               str(user_id) if user_id is not None else None))
 
         # Link the employee to this device -> the console shows "Connected".
+        # One device per user: only (re)bind when the user is free or already on
+        # this device, so an account can't be moved onto a second machine.
         if user_id is not None:
-            cur.execute('UPDATE app_users SET "DeviceId" = %s WHERE "Id" = %s;', (device_id, user_id))
+            cur.execute('SELECT "DeviceId" FROM app_users WHERE "Id" = %s;', (user_id,))
+            bound = cur.fetchone()
+            existing_device = bound[0] if bound else None
+            if not existing_device or existing_device == device_id:
+                cur.execute('UPDATE app_users SET "DeviceId" = %s WHERE "Id" = %s;', (device_id, user_id))
 
         conn.commit()
         cur.close()
@@ -979,6 +1001,21 @@ def register_device():
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+def _purge_device(cur, device_id):
+    """Delete a device and everything reported for it, and unlink any user bound
+    to it. Shared by the agent uninstaller, the dashboard delete button, and the
+    user-deletion cascade. Returns the number of device rows removed."""
+    if not device_id:
+        return 0
+    for t in ('device_metrics', 'installed_applications', 'app_usage_records',
+              'network_usage_records', 'work_session_records', 'device_threats',
+              'blocked_websites', 'device_commands', 'device_session_events'):
+        cur.execute('DELETE FROM %s WHERE device_id = %%s;' % t, (device_id,))
+    cur.execute('UPDATE app_users SET "DeviceId" = NULL WHERE "DeviceId" = %s;', (device_id,))
+    cur.execute('DELETE FROM devices WHERE "DeviceId" = %s;', (device_id,))
+    return cur.rowcount
 
 
 @app.route('/api/devices/unregister', methods=['POST'])
@@ -994,16 +1031,33 @@ def unregister_device():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        for t in ('device_metrics', 'installed_applications', 'app_usage_records',
-                  'network_usage_records', 'work_session_records', 'device_threats',
-                  'blocked_websites', 'device_commands'):
-            cur.execute('DELETE FROM %s WHERE device_id = %%s;' % t, (device_id,))
-        cur.execute('UPDATE app_users SET "DeviceId" = NULL WHERE "DeviceId" = %s;', (device_id,))
-        cur.execute('DELETE FROM devices WHERE "DeviceId" = %s;', (device_id,))
-        removed = cur.rowcount
+        removed = _purge_device(cur, device_id)
         conn.commit()
         cur.close()
         conn.close()
+        return jsonify({'success': True, 'removed': removed}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/devices/<device_id>', methods=['DELETE'])
+def delete_device(device_id):
+    """Dashboard: remove a device and all its data (e.g. a machine whose agent
+    was uninstalled while offline, so it never reported the uninstall)."""
+    device_id = (device_id or '').strip()
+    if not device_id:
+        return jsonify({'error': 'device id required'}), 400
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        removed = _purge_device(cur, device_id)
+        conn.commit()
+        cur.close()
+        conn.close()
+        if removed == 0:
+            return jsonify({'success': False, 'message': 'Device not found.'}), 404
         return jsonify({'success': True, 'removed': removed}), 200
     except Exception as e:
         import traceback
@@ -2377,14 +2431,33 @@ def update_app_user(user_id):
 @app.route('/api/app-users/<int:user_id>', methods=['DELETE'])
 @app.route('/api/users/<int:user_id>', methods=['DELETE'])
 def delete_app_user(user_id):
+    """Delete a dashboard/device user. Any device this user activated (or is
+    linked to) is removed along with it, so an orphaned endpoint doesn't linger
+    in the console."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+        # Collect the devices connected to this user: the one linked on the user
+        # row, plus any device this user activated.
+        cur.execute('SELECT "DeviceId" FROM app_users WHERE "Id" = %s;', (user_id,))
+        row = cur.fetchone()
+        device_ids = set()
+        if row and row[0]:
+            device_ids.add(row[0])
+        cur.execute('SELECT "DeviceId" FROM devices WHERE "ActivatedByUserId" = %s;', (str(user_id),))
+        for d in cur.fetchall():
+            if d[0]:
+                device_ids.add(d[0])
+
+        removed_devices = 0
+        for did in device_ids:
+            removed_devices += _purge_device(cur, did)
+
         cur.execute('DELETE FROM app_users WHERE "Id" = %s;', (user_id,))
         conn.commit()
         cur.close()
         conn.close()
-        return jsonify({'success': True, 'id': user_id}), 200
+        return jsonify({'success': True, 'id': user_id, 'removedDevices': removed_devices}), 200
     except Exception as e:
         import traceback
         traceback.print_exc()

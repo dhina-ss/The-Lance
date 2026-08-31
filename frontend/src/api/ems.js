@@ -121,6 +121,17 @@ export async function fetchDevices() {
   return devices.map(mapDevice);
 }
 
+// Remove a device and all its data (e.g. a machine whose agent was uninstalled
+// while offline, so it never reported the uninstall).
+export async function deleteDevice(id) {
+  const res = await fetch(`${API_BASE}/api/devices/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: credentialHeaders,
+  });
+  if (!res.ok) throwForStatus(res.status);
+  return res.json();
+}
+
 export function fetchDeviceMetrics(id) {
   return getJson(`/api/devices/${encodeURIComponent(id)}/metrics`);
 }
