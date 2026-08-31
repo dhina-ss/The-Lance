@@ -13,6 +13,7 @@ import CriticalAlerts from '../components/tenant/CriticalAlerts';
 import AntivirusStatus from '../components/tenant/AntivirusStatus';
 import DevicesPage from '../components/tenant/DevicesPage';
 import UsersPage from '../components/tenant/UsersPage';
+import SettingsPage from '../components/tenant/SettingsPage';
 import { fetchDevices, fetchOverview } from '../api/ems';
 import { API_BASE, getAuthHeaders } from '../api/client';
 import { Sparkles, Clock, AlertTriangle, FileBarChart, Settings as SettingsIcon } from 'lucide-react';
@@ -216,7 +217,11 @@ export default function TenantDashboardPage() {
 						<div className="relative z-10">
 							<UsersPage onNavigateToDevice={handleNavigateToDevice} />
 						</div>
-					) : activeTab === 'alerts' || activeTab === 'reports' || activeTab === 'settings' ? (
+					) : activeTab === 'settings' ? (
+						<div className="relative z-10">
+							<SettingsPage />
+						</div>
+					) : activeTab === 'alerts' || activeTab === 'reports' ? (
 						<ComingSoonView tab={activeTab} title={titleMap[activeTab] || 'Feature'} />
 					) : activeTab !== 'dashboard' ? (
 						<FeatureModuleView moduleId={activeTab} />
