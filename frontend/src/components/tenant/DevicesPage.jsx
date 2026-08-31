@@ -569,16 +569,6 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 													<span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`}></span>{dev.status}
 												</span>
 											</td>
-											<td className="px-6 py-4 text-right">
-												<button
-													type="button"
-													onClick={(e) => { e.stopPropagation(); openDevice(dev); }}
-													className="p-1.5 text-muted-foreground hover:text-accent hover:bg-accent/10 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 text-xs font-semibold"
-												>
-													<span>Details</span>
-													<span className="material-symbols-outlined leading-none" style={{fontSize: '16px'}}>arrow_outward</span>
-												</button>
-											</td>
 										</tr>
 									);
 								})
