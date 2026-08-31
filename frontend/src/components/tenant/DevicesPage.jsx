@@ -534,7 +534,6 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 								<th className="px-6 py-3.5 w-[22%]">IP Address</th>
 								<th className="px-6 py-3.5 w-[13%]">OS</th>
 								<th className="px-6 py-3.5 w-[12%] text-center">Status</th>
-								<th className="px-6 py-3.5 w-[15%] text-right">Actions</th>
 							</tr>
 						</thead>
 						<tbody className="divide-y divide-border/40 text-xs">
@@ -666,32 +665,6 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 								</div>
 							</div>
 							<div className="flex items-center gap-3">
-								<div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-outline-variant/40">
-									<button
-										type="button"
-										onClick={() => setDetailMode('monitor')}
-										className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-											detailMode === 'monitor'
-												? 'bg-primary text-primary-foreground shadow-sm'
-												: 'text-muted-foreground hover:text-primary'
-										}`}
-									>
-										<span className="material-symbols-outlined text-sm">monitoring</span>
-										<span>Monitor Details</span>
-									</button>
-									<button
-										type="button"
-										onClick={() => setDetailMode('control')}
-										className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-											detailMode === 'control'
-												? 'bg-primary text-primary-foreground shadow-sm'
-												: 'text-muted-foreground hover:text-primary'
-										}`}
-									>
-										<span className="material-symbols-outlined text-sm">tune</span>
-										<span>Control Options</span>
-									</button>
-								</div>
 								<button onClick={() => setInspectDevice(null)} className="w-9 h-9 rounded-full hover:bg-surface-container-high text-on-surface-variant flex items-center justify-center cursor-pointer">
 									<span className="material-symbols-outlined text-xl">close</span>
 								</button>
