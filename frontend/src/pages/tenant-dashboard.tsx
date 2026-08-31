@@ -137,7 +137,13 @@ export default function TenantDashboardPage() {
 	const titleMap: Record<string, string> = {
 		dashboard: 'Dashboard Overview',
 		devices: 'Device Management',
+		'devices-monitor': 'Device Telemetry & Monitoring',
+		'devices-control': 'Remote Fleet Control',
+		'devices-report': 'Device Compliance & Fleet Reports',
 		users: 'User Management',
+		'users-logs': 'User Activity & Audit Logs',
+		'users-monitor': 'User Account Monitoring',
+		'users-report': 'User Analytics & Compliance Reports',
 		alerts: 'Critical Alerts Stream',
 		reports: 'Reports & Analytics',
 		settings: 'System Settings',
@@ -209,11 +215,11 @@ export default function TenantDashboardPage() {
 
 
 					{/* Content Canvas */}
-					{activeTab === 'devices' ? (
+					{activeTab === 'devices' || activeTab.startsWith('devices-') ? (
 						<div className="relative z-10">
-							<DevicesPage initialDeviceId={selectedDeviceId} onClearInitialDevice={() => setSelectedDeviceId(null)} />
+							<DevicesPage activeSubTab={activeTab} initialDeviceId={selectedDeviceId} onClearInitialDevice={() => setSelectedDeviceId(null)} />
 						</div>
-					) : activeTab === 'users' ? (
+					) : activeTab === 'users' || activeTab.startsWith('users-') ? (
 						<div className="relative z-10">
 							<UsersPage onNavigateToDevice={handleNavigateToDevice} />
 						</div>

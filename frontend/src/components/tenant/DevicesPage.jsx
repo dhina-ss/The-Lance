@@ -75,10 +75,22 @@ function statusClasses(status) {
 	return { pill: 'bg-slate-100 text-muted-foreground border border-border/60 font-bold', dot: 'bg-muted-foreground' };
 }
 
-export default function DevicesPage({ initialDeviceId, onClearInitialDevice }) {
+export default function DevicesPage({ initialDeviceId, onClearInitialDevice, activeSubTab = 'devices-monitor' }) {
 	const [devices, setDevices] = useState([]);
 	const [loading, setLoading] = useState(true);
 	const [loadError, setLoadError] = useState(null);
+
+	const [detailMode, setDetailMode] = useState(() =>
+		activeSubTab === 'devices-control' || activeSubTab === 'control' ? 'control' : 'monitor'
+	);
+
+	useEffect(() => {
+		if (activeSubTab === 'devices-control' || activeSubTab === 'control') {
+			setDetailMode('control');
+		} else if (activeSubTab === 'devices-monitor' || activeSubTab === 'monitor') {
+			setDetailMode('monitor');
+		}
+	}, [activeSubTab]);
 
 	const [searchTerm, setSearchTerm] = useState('');
 	const [osTabFilter, setOsTabFilter] = useState('ALL');
@@ -452,8 +464,20 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice }) {
 				<div className="p-6 border-b border-border/60 space-y-4">
 					<div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
 						<div>
-							<h2 className="text-xl font-extrabold text-primary tracking-tight">Endpoint Device Inventory</h2>
-							<p className="text-xs text-muted-foreground mt-0.5">Manage, monitor, and enforce security policies across enterprise assets</p>
+							<h2 className="text-xl font-extrabold text-primary tracking-tight">
+								{activeSubTab === 'devices-control' || activeSubTab === 'control'
+									? 'Endpoint Remote Control & Policy Enforcement'
+									: activeSubTab === 'devices-report' || activeSubTab === 'report'
+									? 'Endpoint Compliance & Fleet Telemetry Reports'
+									: 'Endpoint Device Inventory & Monitoring'}
+							</h2>
+							<p className="text-xs text-muted-foreground mt-0.5">
+								{activeSubTab === 'devices-control' || activeSubTab === 'control'
+									? 'Configure startup policies, USB blocking, website filters, antivirus, and silent software deployment'
+									: activeSubTab === 'devices-report' || activeSubTab === 'report'
+									? 'Overview of device compliance status, Microsoft Defender security logs, and hardware telemetry'
+									: 'Monitor live heartbeats, system vitals, hardware identities, and user session activity'}
+							</p>
 						</div>
 					</div>
 
@@ -504,13 +528,13 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice }) {
 					<table className="w-full text-left border-collapse">
 						<thead className="border-b border-border/60 text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground bg-slate-100/80">
 							<tr>
-								<th className="px-6 py-3.5 w-14 text-center">#</th>
-								<th className="px-6 py-3.5">Device Name</th>
-								<th className="px-6 py-3.5">User</th>
-								<th className="px-6 py-3.5">IP Address</th>
-								<th className="px-6 py-3.5">OS</th>
-								<th className="px-6 py-3.5">Last Seen</th>
-								<th className="px-6 py-3.5 text-center">Status</th>
+								<th className="px-6 py-3.5 w-10 text-center">#</th>
+								<th className="px-6 py-3.5 w-[20%]">Device Name</th>
+								<th className="px-6 py-3.5 w-[18%]">Username</th>
+								<th className="px-6 py-3.5 w-[22%]">IP Address</th>
+								<th className="px-6 py-3.5 w-[13%]">OS</th>
+								<th className="px-6 py-3.5 w-[12%] text-center">Status</th>
+								<th className="px-6 py-3.5 w-[15%] text-right">Actions</th>
 							</tr>
 						</thead>
 						<tbody className="divide-y divide-border/40 text-xs">
@@ -541,11 +565,20 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice }) {
 												)}
 											</td>
 											<td className="px-6 py-4"><span className="font-semibold text-primary block">{dev.os}</span></td>
-											<td className="px-6 py-4 text-xs text-muted-foreground font-semibold">{dev.lastSync}</td>
 											<td className="px-6 py-4 text-center">
 												<span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] ${sc.pill}`}>
 													<span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`}></span>{dev.status}
 												</span>
+											</td>
+											<td className="px-6 py-4 text-right">
+												<button
+													type="button"
+													onClick={(e) => { e.stopPropagation(); openDevice(dev); }}
+													className="p-1.5 text-muted-foreground hover:text-accent hover:bg-accent/10 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 text-xs font-semibold"
+												>
+													<span>Details</span>
+													<span className="material-symbols-outlined leading-none" style={{fontSize: '16px'}}>arrow_outward</span>
+												</button>
 											</td>
 										</tr>
 									);
@@ -632,7 +665,33 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice }) {
 									<p className="text-[12px] text-on-surface-variant font-medium">{inspectDevice.manufacturer || 'Enterprise Node'} • {inspectDevice.model}</p>
 								</div>
 							</div>
-							<div className="flex items-center gap-1">
+							<div className="flex items-center gap-3">
+								<div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-outline-variant/40">
+									<button
+										type="button"
+										onClick={() => setDetailMode('monitor')}
+										className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+											detailMode === 'monitor'
+												? 'bg-primary text-primary-foreground shadow-sm'
+												: 'text-muted-foreground hover:text-primary'
+										}`}
+									>
+										<span className="material-symbols-outlined text-sm">monitoring</span>
+										<span>Monitor Details</span>
+									</button>
+									<button
+										type="button"
+										onClick={() => setDetailMode('control')}
+										className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+											detailMode === 'control'
+												? 'bg-primary text-primary-foreground shadow-sm'
+												: 'text-muted-foreground hover:text-primary'
+										}`}
+									>
+										<span className="material-symbols-outlined text-sm">tune</span>
+										<span>Control Options</span>
+									</button>
+								</div>
 								<button onClick={() => setInspectDevice(null)} className="w-9 h-9 rounded-full hover:bg-surface-container-high text-on-surface-variant flex items-center justify-center cursor-pointer">
 									<span className="material-symbols-outlined text-xl">close</span>
 								</button>
@@ -660,473 +719,436 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice }) {
 								</div>
 							</div>
 
-							{/* Management agent (The Lance Endpoint) status */}
-							<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-								<div className="flex items-center justify-between">
-									<SectionTitle icon="shield_person" text="Management Agent" />
-									{(() => {
-										const a = agentStatusMeta(inspectDevice);
-										return (
-											<span className={`px-3 py-1 font-bold text-[11px] rounded-full flex items-center gap-1 ${a.cls}`}>
-												<span className="material-symbols-outlined text-[13px]">{a.icon}</span>{a.label}
-											</span>
-										);
-									})()}
-								</div>
-								<div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-[13px]">
-									<Field label="Software" value="The Lance Endpoint" />
-									<Field label="Agent Version" value={inspectDevice.agentVersion || '—'} mono />
-									<Field label="Activated On" value={inspectDevice.activatedOn} />
-									<Field label="Registered" value={inspectDevice.registrationDate} />
-									<Field label="Last Check-in" value={inspectDevice.lastSync} />
-								</div>
-								<p className="text-[11px] text-on-surface-variant">{agentStatusMeta(inspectDevice).note}</p>
-
-								<div className="p-4 bg-white rounded-2xl border border-outline-variant/30 flex items-center justify-between">
-									<div className="flex items-center gap-3">
-										<div className={`w-10 h-10 rounded-xl flex items-center justify-center ${loginEachStartup ? 'bg-accent/10 text-accent' : 'bg-surface-container-high text-on-surface-variant'}`}>
-											<span className="material-symbols-outlined">{loginEachStartup ? 'lock_clock' : 'how_to_reg'}</span>
+							{detailMode === 'monitor' ? (
+								<>
+									{/* Performance & Vitals */}
+									<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
+										<SectionTitle icon="monitoring" text="Real-time Performance & System Vitals" />
+										<div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-[13px]">
+											<Meter label="CPU Usage" value={inspectDevice.cpuUsage} percent={inspectDevice.cpuPercent} color="#a110b9" />
+											<Meter label="RAM Usage" value={inspectDevice.ramUsage} percent={inspectDevice.ramPercent} tw="bg-secondary" />
+											<Meter label="Disk Usage" value={inspectDevice.diskUsage} percent={inspectDevice.diskPercent} tw="bg-tertiary" />
 										</div>
-										<div>
-											<span className="font-semibold text-on-surface text-[14px] block">Require sign-in every startup</span>
-											<span className="text-[11px] text-on-surface-variant">
-												{loginEachStartup
-													? 'User must sign in each time the device is turned on.'
-													: 'One-time: stays activated after the first sign-in.'} Applies on the next heartbeat.
-											</span>
+										<div className="grid grid-cols-3 gap-3 pt-2 text-center">
+											<Stat label="Uptime" value={inspectDevice.uptime} />
+											<Stat label="Battery" value={inspectDevice.battery} />
+											<Stat label="Working Hours" value={inspectDevice.workingHours} />
 										</div>
 									</div>
-									<button type="button" onClick={handleToggleLoginPolicy} className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${loginEachStartup ? 'bg-accent' : 'bg-outline-variant'}`}>
-										<span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg transition ${loginEachStartup ? 'translate-x-5' : 'translate-x-0'}`} />
-									</button>
-								</div>
-							</div>
 
-							{/* Performance */}
-							<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-								<SectionTitle icon="monitoring" text="Real-time Performance & System Vitals" />
-								<div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-[13px]">
-									<Meter label="CPU Usage" value={inspectDevice.cpuUsage} percent={inspectDevice.cpuPercent} color="#a110b9" />
-									<Meter label="RAM Usage" value={inspectDevice.ramUsage} percent={inspectDevice.ramPercent} tw="bg-secondary" />
-									<Meter label="Disk Usage" value={inspectDevice.diskUsage} percent={inspectDevice.diskPercent} tw="bg-tertiary" />
-								</div>
-								<div className="grid grid-cols-3 gap-3 pt-2 text-center">
-									<Stat label="Uptime" value={inspectDevice.uptime} />
-									<Stat label="Battery" value={inspectDevice.battery} />
-									<Stat label="Working Hours" value={inspectDevice.workingHours} />
-								</div>
-							</div>
-
-							{/* Hardware + OS */}
-							<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-								<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-									<SectionTitle icon="memory" text="Hardware & Device Identity" />
-									<div className="grid grid-cols-2 gap-4 text-[13px]">
-										<Field label="Device ID" value={inspectDevice.deviceId} mono />
-										<Field label="Manufacturer" value={inspectDevice.manufacturer || '—'} />
-										<Field label="Model" value={inspectDevice.model} />
-										<Field label="Serial Number" value={inspectDevice.serialNumber || '—'} mono />
-										<div className="col-span-2"><Field label="Processor" value={inspectDevice.processor || '—'} /></div>
-										<Field label="Installed RAM" value={inspectDevice.ram || '—'} />
-										<Field label="Storage" value={inspectDevice.storage || '—'} />
-									</div>
-								</div>
-								<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-									<SectionTitle icon="terminal" text="Operating System & Build" />
-									<div className="grid grid-cols-2 gap-4 text-[13px]">
-										<Field label="OS Version" value={inspectDevice.os} />
-										<Field label="Build Number" value={inspectDevice.buildNumber || '—'} mono />
-										<Field label="Last Boot Time" value={inspectDevice.lastBootTime} />
-										<Field label="Registration Date" value={inspectDevice.registrationDate} />
-										<Field label="Last Inventory Update" value={inspectDevice.lastInventoryUpdate} />
-										<Field label="Last Seen" value={inspectDevice.lastSync} />
-									</div>
-								</div>
-							</div>
-
-							{/* Network + USB */}
-							<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-								<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-									<SectionTitle icon="lan" text="Network & Connectivity Telemetry" />
-									<div className="grid grid-cols-2 gap-4 text-[13px]">
-										<Field label="IP Address" value={inspectDevice.ip} mono />
-										<Field label="MAC Address" value={inspectDevice.mac} mono />
-										<div className="col-span-2 space-y-2 pt-2 border-t border-outline-variant/30">
-											<span className="text-[11px] text-on-surface-variant block uppercase font-medium">Network Usage (7 days)</span>
-											<div className="grid grid-cols-3 gap-2 text-center">
-												<div className="bg-white p-2.5 rounded-xl border border-outline-variant/30"><span className="text-[12px] text-on-surface-variant block">Received</span><span className="font-bold text-primary">{inspectDevice.networkReceived}</span></div>
-												<div className="bg-white p-2.5 rounded-xl border border-outline-variant/30"><span className="text-[12px] text-on-surface-variant block">Sent</span><span className="font-bold text-secondary">{inspectDevice.networkSent}</span></div>
-												<div className="bg-white p-2.5 rounded-xl border border-outline-variant/30"><span className="text-[12px] text-on-surface-variant block">Total</span><span className="font-bold text-on-surface">{inspectDevice.networkTotal}</span></div>
+									{/* Hardware + OS */}
+									<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+										<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
+											<SectionTitle icon="memory" text="Hardware & Device Identity" />
+											<div className="grid grid-cols-2 gap-4 text-[13px]">
+												<Field label="Device ID" value={inspectDevice.deviceId} mono />
+												<Field label="Manufacturer" value={inspectDevice.manufacturer || '—'} />
+												<Field label="Model" value={inspectDevice.model} />
+												<Field label="Serial Number" value={inspectDevice.serialNumber || '—'} mono />
+												<div className="col-span-2"><Field label="Processor" value={inspectDevice.processor || '—'} /></div>
+												<Field label="Installed RAM" value={inspectDevice.ram || '—'} />
+												<Field label="Storage" value={inspectDevice.storage || '—'} />
+											</div>
+										</div>
+										<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
+											<SectionTitle icon="terminal" text="Operating System & Build Details" />
+											<div className="grid grid-cols-2 gap-4 text-[13px]">
+												<Field label="OS Version" value={inspectDevice.os} />
+												<Field label="Build Number" value={inspectDevice.buildNumber || '—'} mono />
+												<Field label="Last Boot Time" value={inspectDevice.lastBootTime} />
+												<Field label="Registration Date" value={inspectDevice.registrationDate} />
+												<Field label="Last Inventory Update" value={inspectDevice.lastInventoryUpdate} />
+												<Field label="Last Seen" value={inspectDevice.lastSync} />
 											</div>
 										</div>
 									</div>
-								</div>
 
-								<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4 flex flex-col justify-between">
-									<div className="flex items-center justify-between">
-										<SectionTitle icon="usb" text="USB Peripheral Control" />
-										<span className={`px-3 py-1 text-[11px] font-bold rounded-full ${usbBlockingEnabled ? 'bg-primary/10 text-primary' : 'bg-outline-variant/50 text-on-surface-variant'}`}>{usbBlockingEnabled ? 'BLOCKED' : 'OPEN'}</span>
-									</div>
-									<div className="p-4 bg-white rounded-2xl border border-outline-variant/30 space-y-3">
-										<div className="flex items-center gap-3">
-											<div className={`w-10 h-10 rounded-xl flex items-center justify-center ${usbBlockingEnabled ? 'bg-primary/10 text-primary' : 'bg-surface-container-high text-on-surface-variant'}`}>
-												<span className="material-symbols-outlined">{usbBlockingEnabled ? 'lock' : 'lock_open'}</span>
-											</div>
-											<div>
-												<span className="font-semibold text-on-surface text-[14px] block">USB Storage Blocking</span>
-												<span className="text-[11px] text-on-surface-variant">
-													{usbBlockingEnabled
-														? usbBlockingUntil
-															? `Blocked until ${formatDate(usbBlockingUntil)}`
-															: 'Blocked permanently'
-														: 'Pick how long to block, then apply. Takes effect on the next heartbeat.'}
-												</span>
-											</div>
-										</div>
-										{usbBlockingEnabled ? (
-											<button
-												type="button"
-												onClick={() => handleSetUsb(false)}
-												className="w-full py-2 rounded-xl bg-surface-container-high text-on-surface font-medium text-[13px] hover:bg-surface-container-high/70 cursor-pointer flex items-center justify-center gap-1.5"
-											>
-												<span className="material-symbols-outlined text-base">lock_open</span> Unblock now
-											</button>
-										) : (
-											<div className="flex items-center gap-2">
-												<div className="relative flex-1" ref={usbDropdownRef}>
-													<button
-														type="button"
-														onClick={() => setIsUsbDropdownOpen(!isUsbDropdownOpen)}
-														className="w-full bg-slate-100/90 text-primary font-semibold text-[13px] border border-outline-variant/40 rounded-xl px-3.5 py-2 outline-none cursor-pointer flex items-center justify-between gap-2 hover:bg-slate-200/70 transition-all shadow-xs"
-													>
-														<span>{USB_DURATIONS.find((o) => o.minutes === usbDuration)?.label || '1 hour'}</span>
-														<ChevronDown size={14} className={`transition-transform duration-200 text-muted-foreground ${isUsbDropdownOpen ? 'rotate-180 text-accent' : ''}`} />
-													</button>
-													{isUsbDropdownOpen && (
-														<div className="absolute left-0 top-full mt-2 w-full min-w-[160px] bg-background border border-border/80 rounded-2xl p-1.5 shadow-2xl z-50 space-y-1">
-															{USB_DURATIONS.map((o) => {
-																const isSelected = usbDuration === o.minutes;
-																return (
-																	<div
-																		key={o.minutes}
-																		onClick={() => {
-																			setUsbDuration(o.minutes);
-																			setIsUsbDropdownOpen(false);
-																		}}
-																		className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer select-none transition-colors ${
-																			isSelected ? 'bg-primary/10 text-primary font-bold' : 'text-muted-foreground hover:bg-slate-100 hover:text-primary'
-																		}`}
-																	>
-																		<span>{o.label}</span>
-																		{isSelected && <Check size={14} className="text-primary" />}
-																	</div>
-																);
-															})}
-														</div>
-													)}
+									{/* Network Telemetry */}
+									<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
+										<SectionTitle icon="lan" text="Network & Connectivity Telemetry" />
+										<div className="grid grid-cols-2 gap-4 text-[13px]">
+											<Field label="IP Address" value={inspectDevice.ip} mono />
+											<Field label="MAC Address" value={inspectDevice.mac} mono />
+											<div className="col-span-2 space-y-2 pt-2 border-t border-outline-variant/30">
+												<span className="text-[11px] text-on-surface-variant block uppercase font-medium">Network Usage (7 days)</span>
+												<div className="grid grid-cols-3 gap-2 text-center">
+													<div className="bg-white p-2.5 rounded-xl border border-outline-variant/30"><span className="text-[12px] text-on-surface-variant block">Received</span><span className="font-bold text-primary">{inspectDevice.networkReceived}</span></div>
+													<div className="bg-white p-2.5 rounded-xl border border-outline-variant/30"><span className="text-[12px] text-on-surface-variant block">Sent</span><span className="font-bold text-secondary">{inspectDevice.networkSent}</span></div>
+													<div className="bg-white p-2.5 rounded-xl border border-outline-variant/30"><span className="text-[12px] text-on-surface-variant block">Total</span><span className="font-bold text-on-surface">{inspectDevice.networkTotal}</span></div>
 												</div>
-												<button
-													type="button"
-													onClick={() => handleSetUsb(true, usbDuration === 0 ? null : usbDuration)}
-													className="px-3.5 py-2 bg-accent text-on-primary font-medium text-[13px] rounded-xl hover:bg-primary/90 cursor-pointer whitespace-nowrap"
-												>
-													Block USB
-												</button>
 											</div>
+										</div>
+									</div>
+
+									{/* Location with Map */}
+									<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
+										<div className="flex items-center justify-between">
+											<SectionTitle icon="location_on" text={inspectDevice.locationSource === 'GPS' ? 'Precise Location' : 'Approximate Location'} />
+											{inspectDevice.locationSource && (
+												<span className={`px-3 py-1 font-bold text-[11px] rounded-full flex items-center gap-1 ${inspectDevice.locationSource === 'GPS' ? 'bg-secondary/10 text-secondary' : 'bg-primary/10 text-primary'}`}>
+													<span className="material-symbols-outlined text-[13px]">{inspectDevice.locationSource === 'GPS' ? 'my_location' : 'public'}</span>
+													{inspectDevice.locationSource === 'GPS'
+														? `GPS${inspectDevice.gpsAccuracyMeters ? ` · ±${Math.round(inspectDevice.gpsAccuracyMeters)}m` : ''}`
+														: 'IP (approx)'}
+												</span>
+											)}
+										</div>
+										{inspectDevice.latitude != null && inspectDevice.longitude != null ? (
+											<div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+												<div className="grid grid-cols-2 gap-4 text-[13px] content-start">
+													<Field label="City" value={inspectDevice.city || '—'} />
+													<Field label="Region" value={inspectDevice.region || '—'} />
+													<Field label="Country" value={inspectDevice.country || '—'} />
+													<Field label="Public IP" value={inspectDevice.publicIp || '—'} mono />
+													<Field label="Coordinates" value={`${inspectDevice.latitude.toFixed(4)}, ${inspectDevice.longitude.toFixed(4)}`} mono />
+													<div>
+														<span className="text-[11px] text-on-surface-variant block uppercase font-medium mb-0.5">Map</span>
+														<a href={`https://www.openstreetmap.org/?mlat=${inspectDevice.latitude}&mlon=${inspectDevice.longitude}#map=12/${inspectDevice.latitude}/${inspectDevice.longitude}`} target="_blank" rel="noreferrer" className="text-primary font-semibold text-[13px] hover:underline">Open in OpenStreetMap</a>
+													</div>
+												</div>
+												<div className="rounded-2xl overflow-hidden border border-outline-variant/40 h-56 bg-surface-container-high">
+													<iframe
+														title="Device location"
+														className="w-full h-full"
+														loading="lazy"
+														src={`https://www.openstreetmap.org/export/embed.html?bbox=${inspectDevice.longitude - 0.08}%2C${inspectDevice.latitude - 0.06}%2C${inspectDevice.longitude + 0.08}%2C${inspectDevice.latitude + 0.06}&layer=mapnik&marker=${inspectDevice.latitude}%2C${inspectDevice.longitude}`}
+													/>
+												</div>
+											</div>
+										) : (
+											<p className="text-[12px] text-on-surface-variant">
+												No location yet. It resolves from the device's public IP on its next heartbeat.
+											</p>
 										)}
 									</div>
-								</div>
-							</div>
 
-							{/* Location */}
-							<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-								<div className="flex items-center justify-between">
-									<SectionTitle icon="location_on" text={inspectDevice.locationSource === 'GPS' ? 'Precise Location' : 'Approximate Location'} />
-									{inspectDevice.locationSource && (
-										<span className={`px-3 py-1 font-bold text-[11px] rounded-full flex items-center gap-1 ${inspectDevice.locationSource === 'GPS' ? 'bg-secondary/10 text-secondary' : 'bg-primary/10 text-primary'}`}>
-											<span className="material-symbols-outlined text-[13px]">{inspectDevice.locationSource === 'GPS' ? 'my_location' : 'public'}</span>
-											{inspectDevice.locationSource === 'GPS'
-												? `GPS${inspectDevice.gpsAccuracyMeters ? ` · ±${Math.round(inspectDevice.gpsAccuracyMeters)}m` : ''}`
-												: 'IP (approx)'}
-										</span>
-									)}
-								</div>
-								{inspectDevice.latitude != null && inspectDevice.longitude != null ? (
-									<div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-										<div className="grid grid-cols-2 gap-4 text-[13px] content-start">
-											<Field label="City" value={inspectDevice.city || '—'} />
-											<Field label="Region" value={inspectDevice.region || '—'} />
-											<Field label="Country" value={inspectDevice.country || '—'} />
-											<Field label="Public IP" value={inspectDevice.publicIp || '—'} mono />
-											<Field label="Coordinates" value={`${inspectDevice.latitude.toFixed(4)}, ${inspectDevice.longitude.toFixed(4)}`} mono />
-											<div>
-												<span className="text-[11px] text-on-surface-variant block uppercase font-medium mb-0.5">Map</span>
-												<a href={`https://www.openstreetmap.org/?mlat=${inspectDevice.latitude}&mlon=${inspectDevice.longitude}#map=12/${inspectDevice.latitude}/${inspectDevice.longitude}`} target="_blank" rel="noreferrer" className="text-primary font-semibold text-[13px] hover:underline">Open in OpenStreetMap</a>
-											</div>
-										</div>
-										<div className="rounded-2xl overflow-hidden border border-outline-variant/40 h-56 bg-surface-container-high">
-											<iframe
-												title="Device location"
-												className="w-full h-full"
-												loading="lazy"
-												src={`https://www.openstreetmap.org/export/embed.html?bbox=${inspectDevice.longitude - 0.08}%2C${inspectDevice.latitude - 0.06}%2C${inspectDevice.longitude + 0.08}%2C${inspectDevice.latitude + 0.06}&layer=mapnik&marker=${inspectDevice.latitude}%2C${inspectDevice.longitude}`}
-											/>
-										</div>
-									</div>
-								) : (
-									<p className="text-[12px] text-on-surface-variant">
-										No location yet. It resolves from the device's public IP on its next heartbeat
-										after this update is deployed (private/office IPs may not geolocate).
-									</p>
-								)}
-							</div>
-
-							{/* Security / Antivirus (Microsoft Defender) */}
-							<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-								<div className="flex items-center justify-between">
-									<SectionTitle icon="security" text="Antivirus & Threat Protection" />
-									{(() => {
-										const ws = windowsSecurity(inspectDevice);
-										const badge = !ws.reported
-											? { txt: 'UNKNOWN', cls: 'bg-outline-variant/50 text-on-surface-variant', icon: 'help' }
-											: ws.secured
-												? { txt: 'SECURED', cls: 'bg-primary/10 text-primary', icon: 'verified_user' }
-												: { txt: 'NOT SECURED', cls: 'bg-error/10 text-error', icon: 'gpp_bad' };
-										return (
-											<span className={`px-3 py-1 font-bold text-[11px] rounded-full flex items-center gap-1 ${badge.cls}`}>
-												<span className="material-symbols-outlined text-[13px]">{badge.icon}</span>{badge.txt}
-											</span>
-										);
-									})()}
-								</div>
-								{inspectDevice.securityStatusUpdatedAt ? (
-									<>
-										<div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-[13px]">
-											<Field label="Windows Security" value={windowsSecurity(inspectDevice).secured ? 'Secured' : 'Not secured'} />
-											<Field label="Real-time Protection" value={boolLabel(inspectDevice.defenderRealtime)} />
-											<Field label="Antivirus" value={boolLabel(inspectDevice.defenderAntivirus)} />
-											<Field
-												label="Definitions"
-												value={
-													inspectDevice.defenderSignatureVersion
-														? `${inspectDevice.defenderSignatureVersion}${
-																inspectDevice.defenderSignatureAgeDays != null
-																	? ` (${inspectDevice.defenderSignatureAgeDays}d old)`
-																	: ''
-															}`
-														: '—'
-												}
-											/>
-											<Field label="Engine Version" value={inspectDevice.defenderEngineVersion || '—'} mono />
-											<Field label="Last Quick Scan" value={inspectDevice.defenderLastQuickScan ? relativeTime(inspectDevice.defenderLastQuickScan) : 'Never'} />
-											<Field label="Last Full Scan" value={inspectDevice.defenderLastFullScan ? relativeTime(inspectDevice.defenderLastFullScan) : 'Never'} />
-										</div>
-										<div className="pt-2 border-t border-outline-variant/30 space-y-2">
-											<div className="flex items-center justify-between">
-												<span className="text-[12px] font-bold text-on-surface-variant uppercase tracking-wider">Threat History</span>
-												<span className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] ${(inspectDevice.threats ?? []).some((t) => !t.remediated) ? 'bg-error/10 text-error' : 'bg-primary/10 text-primary'}`}>
-													{(inspectDevice.threats ?? []).length} DETECTED
-												</span>
-											</div>
-											<div className="space-y-2 text-[13px] max-h-56 overflow-y-auto pr-1">
-												{(inspectDevice.threats ?? []).length === 0 && (
-													<span className="text-[12px] text-on-surface-variant">No threats recorded by Defender.</span>
-												)}
-												{(inspectDevice.threats ?? []).map((t) => {
-													const sev = severityMeta(t.severity);
+									{/* Application Usage & Login Logs */}
+									<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+										<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
+											<SectionTitle icon="hourglass_top" text="Application Usage (Today)" />
+											<div className="space-y-3 text-[13px]">
+												{(inspectDevice.appUsage ?? []).length === 0 && <span className="text-[12px] text-on-surface-variant">No usage recorded today.</span>}
+												{(inspectDevice.appUsage ?? []).slice(0, 8).map((item, i) => {
+													const top = inspectDevice.appUsage[0]?.durationSeconds || 1;
+													const pct = Math.round((item.durationSeconds / top) * 100);
+													const colors = ['bg-primary', 'bg-secondary', 'bg-tertiary', 'bg-outline-variant'];
 													return (
-														<div key={t.id} className="flex items-start justify-between gap-3 p-2.5 bg-white rounded-xl border border-outline-variant/30">
-															<div className="min-w-0">
-																<span className="font-semibold text-on-surface block truncate">{t.name}</span>
-																<span className="text-[11px] text-on-surface-variant block truncate">
-																	{t.resource || '—'}{t.detectedAt ? ` · ${formatDate(t.detectedAt)}` : ''}
-																</span>
+														<div key={item.applicationName}>
+															<div className="flex justify-between text-[12px] mb-1 font-semibold">
+																<span className="text-on-surface">{item.applicationName}</span>
+																<span className="text-on-surface-variant font-mono">{formatDuration(item.durationSeconds)}</span>
 															</div>
-															<div className="flex items-center gap-1.5 shrink-0">
-																<span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${sev.cls}`}>{sev.label}</span>
-																<span className={`px-2 py-0.5 rounded-md font-medium text-[10px] ${t.remediated ? 'bg-primary/10 text-primary' : 'bg-error/10 text-error'}`}>
-																	{t.remediated ? 'Quarantined' : 'Active'}
-																</span>
+															<div className="w-full h-2 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
+																<div className={`h-full ${colors[i % colors.length]}`} style={{ width: `${pct}%` }}></div>
 															</div>
 														</div>
 													);
 												})}
 											</div>
 										</div>
-										<p className="text-[11px] text-on-surface-variant">
-											Read-only status from Microsoft Defender · reported {relativeTime(inspectDevice.securityStatusUpdatedAt)}
-										</p>
-									</>
-								) : (
-									<p className="text-[12px] text-on-surface-variant">
-										No Defender status reported yet. The agent reports it on its next cycle after this
-										update reaches the device.
-									</p>
-								)}
-							</div>
 
-							{/* Website filter */}
-							<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-								<div className="flex items-center justify-between">
-									<SectionTitle icon="language" text="Website Content Filter" />
-									<span className="px-3 py-1 bg-primary/10 text-primary font-bold text-[11px] rounded-full">{blockedDomains.length} BLOCKED</span>
-								</div>
-								<form onSubmit={handleAddBlockedDomain} className="flex items-center gap-2">
-									<input type="text" placeholder="Enter domain to block e.g. tiktok.com" value={newDomainInput} onChange={(e) => setNewDomainInput(e.target.value)} className="flex-1 bg-white border border-outline-variant/40 rounded-xl px-3 py-2 text-[13px] outline-none focus:ring-2 focus:ring-primary/20" />
-									<button type="submit" className="px-3.5 py-2 bg-accent text-on-primary font-medium text-[13px] rounded-xl hover:bg-slate-400 cursor-pointer whitespace-nowrap">Block Domain</button>
-								</form>
-								<div className="flex flex-wrap gap-1.5">
-									{blockedDomains.length === 0 && <span className="text-[12px] text-on-surface-variant">No custom domains blocked.</span>}
-									{blockedDomains.map((item) => (
-										<span key={item.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-error/10 text-error text-[12px] font-mono rounded-lg border border-error/20 font-semibold">
-											<span>{item.domain}</span>
-											<button type="button" onClick={() => handleRemoveBlockedDomain(item)} className="text-error/70 hover:text-error cursor-pointer flex items-center"><span className="material-symbols-outlined text-xs">close</span></button>
-										</span>
-									))}
-								</div>
-							</div>
-
-							{/* Installed apps + usage */}
-							<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-								<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-									<SectionTitle icon="apps" text={`Installed Applications (${inspectDevice.installedApps?.length ?? 0})`} />
-									<div className="space-y-2 text-[13px] max-h-72 overflow-y-auto pr-1">
-										{(inspectDevice.installedApps ?? []).length === 0 && <span className="text-[12px] text-on-surface-variant">No inventory reported yet.</span>}
-										{(inspectDevice.installedApps ?? []).map((app) => (
-											<div key={app.id} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-outline-variant/30">
-												<div className="min-w-0">
-													<span className="font-semibold text-on-surface block truncate">{app.name}</span>
-													<span className="text-[11px] text-on-surface-variant">{[app.publisher, app.version].filter(Boolean).join(' · ') || '—'}</span>
+										<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-3">
+											<SectionTitle text="Login Logs (last 30 days)" />
+											{(inspectDevice.sessionEvents ?? []).filter(sessionEventShown).length === 0 ? (
+												<p className="text-[12px] text-on-surface-variant">No login activity recorded yet.</p>
+											) : (
+												<div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+													{(inspectDevice.sessionEvents ?? []).filter(sessionEventShown).map((e, i) => {
+														const meta = sessionEventMeta(e.type);
+														return (
+															<div key={i} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-outline-variant/30 text-[12px]">
+																<span className="flex items-center gap-2 font-medium text-on-surface">
+																	<span className={`material-symbols-outlined text-[18px] ${meta.color}`}>{meta.icon}</span>
+																	{meta.label}{e.type === 'shutdown' && e.detail ? ' · off for ' + e.detail : ''}
+																</span>
+																<span className="font-mono text-on-surface-variant">{formatDateTime(e.at)}</span>
+															</div>
+														);
+													})}
 												</div>
-												<button onClick={() => handleUninstall(app)} title="Uninstall" className="ml-2 p-1.5 w-9 h-9 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/10 cursor-pointer shrink-0">
-													<span className="material-symbols-outlined text-lg">delete_sweep</span>
+											)}
+										</div>
+									</div>
+								</>
+							) : (
+								<>
+									{/* Control Mode Sections */}
+									{/* Require Startup Sign-in Option */}
+									<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
+										<div className="flex items-center justify-between">
+											<SectionTitle icon="shield_person" text="Management Agent & Startup Policy" />
+											{(() => {
+												const a = agentStatusMeta(inspectDevice);
+												return (
+													<span className={`px-3 py-1 font-bold text-[11px] rounded-full flex items-center gap-1 ${a.cls}`}>
+														<span className="material-symbols-outlined text-[13px]">{a.icon}</span>{a.label}
+													</span>
+												);
+											})()}
+										</div>
+										<div className="p-4 bg-white rounded-2xl border border-outline-variant/30 flex items-center justify-between">
+											<div className="flex items-center gap-3">
+												<div className={`w-10 h-10 rounded-xl flex items-center justify-center ${loginEachStartup ? 'bg-accent/10 text-accent' : 'bg-surface-container-high text-on-surface-variant'}`}>
+													<span className="material-symbols-outlined">{loginEachStartup ? 'lock_clock' : 'how_to_reg'}</span>
+												</div>
+												<div>
+													<span className="font-semibold text-on-surface text-[14px] block">Require sign-in every startup</span>
+													<span className="text-[11px] text-on-surface-variant">
+														{loginEachStartup
+															? 'User must sign in each time the device is turned on.'
+															: 'One-time: stays activated after the first sign-in.'} Applies on the next heartbeat.
+													</span>
+												</div>
+											</div>
+											<button type="button" onClick={handleToggleLoginPolicy} className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${loginEachStartup ? 'bg-accent' : 'bg-outline-variant'}`}>
+												<span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg transition ${loginEachStartup ? 'translate-x-5' : 'translate-x-0'}`} />
+											</button>
+										</div>
+									</div>
+
+									{/* USB Peripheral Control */}
+									<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
+										<div className="flex items-center justify-between">
+											<SectionTitle icon="usb" text="USB Peripheral Control" />
+											<span className={`px-3 py-1 text-[11px] font-bold rounded-full ${usbBlockingEnabled ? 'bg-primary/10 text-primary' : 'bg-outline-variant/50 text-on-surface-variant'}`}>{usbBlockingEnabled ? 'BLOCKED' : 'OPEN'}</span>
+										</div>
+										<div className="p-4 bg-white rounded-2xl border border-outline-variant/30 space-y-3">
+											<div className="flex items-center gap-3">
+												<div className={`w-10 h-10 rounded-xl flex items-center justify-center ${usbBlockingEnabled ? 'bg-primary/10 text-primary' : 'bg-surface-container-high text-on-surface-variant'}`}>
+													<span className="material-symbols-outlined">{usbBlockingEnabled ? 'lock' : 'lock_open'}</span>
+												</div>
+												<div>
+													<span className="font-semibold text-on-surface text-[14px] block">USB Storage Blocking</span>
+													<span className="text-[11px] text-on-surface-variant">
+														{usbBlockingEnabled
+															? usbBlockingUntil
+																? `Blocked until ${formatDate(usbBlockingUntil)}`
+																: 'Blocked permanently'
+															: 'Pick how long to block, then apply. Takes effect on the next heartbeat.'}
+													</span>
+												</div>
+											</div>
+											{usbBlockingEnabled ? (
+												<button
+													type="button"
+													onClick={() => handleSetUsb(false)}
+													className="w-full py-2 rounded-xl bg-surface-container-high text-on-surface font-medium text-[13px] hover:bg-surface-container-high/70 cursor-pointer flex items-center justify-center gap-1.5"
+												>
+													<span className="material-symbols-outlined text-base">lock_open</span> Unblock now
 												</button>
-											</div>
-										))}
-									</div>
-								</div>
-
-								<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-									<SectionTitle icon="hourglass_top" text="Application Usage (Today)" />
-									<div className="space-y-3 text-[13px]">
-										{(inspectDevice.appUsage ?? []).length === 0 && <span className="text-[12px] text-on-surface-variant">No usage recorded today.</span>}
-										{(inspectDevice.appUsage ?? []).slice(0, 8).map((item, i) => {
-											const top = inspectDevice.appUsage[0]?.durationSeconds || 1;
-											const pct = Math.round((item.durationSeconds / top) * 100);
-											const colors = ['bg-primary', 'bg-secondary', 'bg-tertiary', 'bg-outline-variant'];
-											return (
-												<div key={item.applicationName}>
-													<div className="flex justify-between text-[12px] mb-1 font-semibold">
-														<span className="text-on-surface">{item.applicationName}</span>
-														<span className="text-on-surface-variant font-mono">{formatDuration(item.durationSeconds)}</span>
-													</div>
-													<div className="w-full h-2 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
-														<div className={`h-full ${colors[i % colors.length]}`} style={{ width: `${pct}%` }}></div>
-													</div>
-												</div>
-											);
-										})}
-									</div>
-								</div>
-							</div>
-
-							{/* Software management + recent commands */}
-							<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-								<SectionTitle icon="system_update_alt" text="Software Management & Remote Push" />
-								<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-									<button onClick={() => pushFileRef.current?.click()} className="flex items-center justify-center gap-2 p-3 bg-accent text-on-primary font-semibold text-[13px] rounded-xl hover:bg-primary/90 hover:text-white cursor-pointer">
-										<span className="material-symbols-outlined text-base">upload_file</span> Push MSI / EXE Installer
-									</button>
-									<div className="flex items-center justify-center gap-2 p-3 bg-surface-container-high text-on-surface-variant font-medium text-[13px] rounded-xl border border-outline-variant/30">
-										<span className="material-symbols-outlined text-base">info</span> Uninstall: use the app list above
-									</div>
-									<input ref={pushFileRef} type="file" accept=".msi,.exe" hidden onChange={handlePushInstaller} />
-								</div>
-
-								<div className="pt-2 space-y-2">
-									<span className="text-[12px] font-bold text-on-surface-variant uppercase tracking-wider block">Recent Commands</span>
-
-									{/* In-progress banner: elapsed time + average time to complete, live every 10s. */}
-									{(() => {
-										const active = (inspectDevice.commands ?? []).filter(
-											(c) => c.status === 'Pending' || c.status === 'Dispatched',
-										);
-										if (active.length === 0) return null;
-										const oldest = active.reduce(
-											(a, c) => (!a || Date.parse(c.createdAt) < Date.parse(a.createdAt) ? c : a),
-											null,
-										);
-										const elapsed = oldest?.createdAt ? (nowTick - Date.parse(oldest.createdAt)) / 1000 : 0;
-										const type = oldest?.type || 'Uninstall';
-										const avg = commandAvgSeconds(inspectDevice.commands, type);
-										return (
-											<div className="p-3 rounded-xl bg-accent/10 border border-accent/20 flex items-center gap-2.5 text-[12px]">
-												<Loader2 size={15} className="animate-spin text-accent shrink-0" />
-												<span className="text-on-surface font-medium">
-													{active.length} {type.toLowerCase()}{active.length > 1 ? 's' : ''} in progress · elapsed{' '}
-													<span className="font-mono font-semibold">{fmtSecs(elapsed)}</span>
-													{avg != null ? (
-														<> · avg ~<span className="font-mono font-semibold">{fmtSecs(avg)}</span></>
-													) : (
-														<span className="text-on-surface-variant"> · avg pending history</span>
-													)}
-												</span>
-											</div>
-										);
-									})()}
-
-									<div className="space-y-2 text-[12px]">
-										{(inspectDevice.commands ?? []).length === 0 && <span className="text-[12px] text-on-surface-variant">No software-management commands yet.</span>}
-										{(inspectDevice.commands ?? []).slice(0, 8).map((c) => {
-											const activeCmd = c.status === 'Pending' || c.status === 'Dispatched';
-											const elapsed = activeCmd && c.createdAt ? (nowTick - Date.parse(c.createdAt)) / 1000 : null;
-											return (
-												<div key={c.id} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-outline-variant/30">
-													<span className="text-on-surface font-medium truncate"><span className="font-semibold">{c.type}</span> — {c.targetAppName || c.packageName || '—'}{c.resultMessage ? <span className="text-on-surface-variant"> · {c.resultMessage}</span> : ''}</span>
-													<span className="flex items-center gap-2 shrink-0 ml-2">
-														{elapsed != null && <span className="font-mono text-[11px] text-on-surface-variant">{fmtSecs(elapsed)}</span>}
-														<span className={`px-2.5 py-0.5 rounded-md font-mono font-medium text-[11px] ${c.status === 'Succeeded' ? 'bg-primary/10 text-primary' : c.status === 'Failed' ? 'bg-error/10 text-error' : c.status === 'Cancelled' ? 'bg-surface-container-high text-on-surface-variant' : 'bg-surface-container-high text-on-surface'}`}>{c.status}</span>
-														{activeCmd && (
-															<button
-																type="button"
-																title="Cancel this command"
-																disabled={cancellingCommandId === c.id}
-																onClick={() => handleCancelCommand(c.id)}
-																className="flex items-center justify-center w-6 h-6 rounded-md text-on-surface-variant hover:text-error hover:bg-error/10 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-															>
-																{cancellingCommandId === c.id ? <Loader2 size={14} className="animate-spin" /> : <StopCircle size={15} />}
-															</button>
+											) : (
+												<div className="flex items-center gap-2">
+													<div className="relative flex-1" ref={usbDropdownRef}>
+														<button
+															type="button"
+															onClick={() => setIsUsbDropdownOpen(!isUsbDropdownOpen)}
+															className="w-full bg-slate-100/90 text-primary font-semibold text-[13px] border border-outline-variant/40 rounded-xl px-3.5 py-2 outline-none cursor-pointer flex items-center justify-between gap-2 hover:bg-slate-200/70 transition-all shadow-xs"
+														>
+															<span>{USB_DURATIONS.find((o) => o.minutes === usbDuration)?.label || '1 hour'}</span>
+															<ChevronDown size={14} className={`transition-transform duration-200 text-muted-foreground ${isUsbDropdownOpen ? 'rotate-180 text-accent' : ''}`} />
+														</button>
+														{isUsbDropdownOpen && (
+															<div className="absolute left-0 top-full mt-2 w-full min-w-[160px] bg-background border border-border/80 rounded-2xl p-1.5 shadow-2xl z-50 space-y-1">
+																{USB_DURATIONS.map((o) => {
+																	const isSelected = usbDuration === o.minutes;
+																	return (
+																		<div
+																			key={o.minutes}
+																			onClick={() => {
+																				setUsbDuration(o.minutes);
+																				setIsUsbDropdownOpen(false);
+																			}}
+																			className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer select-none transition-colors ${
+																				isSelected ? 'bg-primary/10 text-primary font-bold' : 'text-muted-foreground hover:bg-slate-100 hover:text-primary'
+																			}`}
+																		>
+																			<span>{o.label}</span>
+																			{isSelected && <Check size={14} className="text-primary" />}
+																		</div>
+																	);
+																})}
+															</div>
 														)}
-													</span>
+													</div>
+													<button
+														type="button"
+														onClick={() => handleSetUsb(true, usbDuration === 0 ? null : usbDuration)}
+														className="px-3.5 py-2 bg-accent text-on-primary font-medium text-[13px] rounded-xl hover:bg-primary/90 cursor-pointer whitespace-nowrap"
+													>
+														Block USB
+													</button>
 												</div>
-											);
-										})}
+											)}
+										</div>
 									</div>
-								</div>
-							</div>
 
-							{/* Login logs (last 30 days) */}
-							<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-3">
-								<SectionTitle text="Login Logs (last 30 days)" />
-								{(inspectDevice.sessionEvents ?? []).filter(sessionEventShown).length === 0 ? (
-									<p className="text-[12px] text-on-surface-variant">No login activity recorded yet.</p>
-								) : (
-									<div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-										{(inspectDevice.sessionEvents ?? []).filter(sessionEventShown).map((e, i) => {
-											const meta = sessionEventMeta(e.type);
-											return (
-												<div key={i} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-outline-variant/30 text-[12px]">
-													<span className="flex items-center gap-2 font-medium text-on-surface">
-														<span className={`material-symbols-outlined text-[18px] ${meta.color}`}>{meta.icon}</span>
-														{meta.label}{e.type === 'shutdown' && e.detail ? ' · off for ' + e.detail : ''}
-													</span>
-													<span className="font-mono text-on-surface-variant">{formatDateTime(e.at)}</span>
-												</div>
-											);
-										})}
+									{/* Website Content Filter */}
+									<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
+										<div className="flex items-center justify-between">
+											<SectionTitle icon="language" text="Website Content Filter" />
+											<span className="px-3 py-1 bg-primary/10 text-primary font-bold text-[11px] rounded-full">{blockedDomains.length} BLOCKED</span>
+										</div>
+										<form onSubmit={handleAddBlockedDomain} className="flex items-center gap-2">
+											<input type="text" placeholder="Enter domain to block e.g. tiktok.com" value={newDomainInput} onChange={(e) => setNewDomainInput(e.target.value)} className="flex-1 bg-white border border-outline-variant/40 rounded-xl px-3 py-2 text-[13px] outline-none focus:ring-2 focus:ring-primary/20" />
+											<button type="submit" className="px-3.5 py-2 bg-accent text-on-primary font-medium text-[13px] rounded-xl hover:bg-slate-400 cursor-pointer whitespace-nowrap">Block Domain</button>
+										</form>
+										<div className="flex flex-wrap gap-1.5">
+											{blockedDomains.length === 0 && <span className="text-[12px] text-on-surface-variant">No custom domains blocked.</span>}
+											{blockedDomains.map((item) => (
+												<span key={item.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-error/10 text-error text-[12px] font-mono rounded-lg border border-error/20 font-semibold">
+													<span>{item.domain}</span>
+													<button type="button" onClick={() => handleRemoveBlockedDomain(item)} className="text-error/70 hover:text-error cursor-pointer flex items-center"><span className="material-symbols-outlined text-xs">close</span></button>
+												</span>
+											))}
+										</div>
 									</div>
-								)}
-							</div>
+
+									{/* Antivirus & Threat Protection */}
+									<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
+										<div className="flex items-center justify-between">
+											<SectionTitle icon="security" text="Antivirus & Threat Protection" />
+											{(() => {
+												const ws = windowsSecurity(inspectDevice);
+												const badge = !ws.reported
+													? { txt: 'UNKNOWN', cls: 'bg-outline-variant/50 text-on-surface-variant', icon: 'help' }
+													: ws.secured
+														? { txt: 'SECURED', cls: 'bg-primary/10 text-primary', icon: 'verified_user' }
+														: { txt: 'NOT SECURED', cls: 'bg-error/10 text-error', icon: 'gpp_bad' };
+												return (
+													<span className={`px-3 py-1 font-bold text-[11px] rounded-full flex items-center gap-1 ${badge.cls}`}>
+														<span className="material-symbols-outlined text-[13px]">{badge.icon}</span>{badge.txt}
+													</span>
+												);
+											})()}
+										</div>
+										{inspectDevice.securityStatusUpdatedAt ? (
+											<>
+												<div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-[13px]">
+													<Field label="Windows Security" value={windowsSecurity(inspectDevice).secured ? 'Secured' : 'Not secured'} />
+													<Field label="Real-time Protection" value={boolLabel(inspectDevice.defenderRealtime)} />
+													<Field label="Antivirus" value={boolLabel(inspectDevice.defenderAntivirus)} />
+													<Field
+														label="Definitions"
+														value={
+															inspectDevice.defenderSignatureVersion
+																? `${inspectDevice.defenderSignatureVersion}${
+																		inspectDevice.defenderSignatureAgeDays != null
+																			? ` (${inspectDevice.defenderSignatureAgeDays}d old)`
+																			: ''
+																	}`
+																: '—'
+														}
+													/>
+													<Field label="Engine Version" value={inspectDevice.defenderEngineVersion || '—'} mono />
+													<Field label="Last Quick Scan" value={inspectDevice.defenderLastQuickScan ? relativeTime(inspectDevice.defenderLastQuickScan) : 'Never'} />
+													<Field label="Last Full Scan" value={inspectDevice.defenderLastFullScan ? relativeTime(inspectDevice.defenderLastFullScan) : 'Never'} />
+												</div>
+												<div className="pt-2 border-t border-outline-variant/30 space-y-2">
+													<div className="flex items-center justify-between">
+														<span className="text-[12px] font-bold text-on-surface-variant uppercase tracking-wider">Threat History</span>
+														<span className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] ${(inspectDevice.threats ?? []).some((t) => !t.remediated) ? 'bg-error/10 text-error' : 'bg-primary/10 text-primary'}`}>
+															{(inspectDevice.threats ?? []).length} DETECTED
+														</span>
+													</div>
+													<div className="space-y-2 text-[13px] max-h-56 overflow-y-auto pr-1">
+														{(inspectDevice.threats ?? []).length === 0 && (
+															<span className="text-[12px] text-on-surface-variant">No threats recorded by Defender.</span>
+														)}
+														{(inspectDevice.threats ?? []).map((t) => {
+															const sev = severityMeta(t.severity);
+															return (
+																<div key={t.id} className="flex items-start justify-between gap-3 p-2.5 bg-white rounded-xl border border-outline-variant/30">
+																	<div className="min-w-0">
+																		<span className="font-semibold text-on-surface block truncate">{t.name}</span>
+																		<span className="text-[11px] text-on-surface-variant block truncate">
+																			{t.resource || '—'}{t.detectedAt ? ` · ${formatDate(t.detectedAt)}` : ''}
+																		</span>
+																	</div>
+																	<div className="flex items-center gap-1.5 shrink-0">
+																		<span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${sev.cls}`}>{sev.label}</span>
+																		<span className={`px-2 py-0.5 rounded-md font-medium text-[10px] ${t.remediated ? 'bg-primary/10 text-primary' : 'bg-error/10 text-error'}`}>
+																			{t.remediated ? 'Quarantined' : 'Active'}
+																		</span>
+																	</div>
+																</div>
+															);
+														})}
+													</div>
+												</div>
+												<p className="text-[11px] text-on-surface-variant">
+													Read-only status from Microsoft Defender · reported {relativeTime(inspectDevice.securityStatusUpdatedAt)}
+												</p>
+											</>
+										) : (
+											<p className="text-[12px] text-on-surface-variant">
+												No Defender status reported yet.
+											</p>
+										)}
+									</div>
+
+									{/* Installed Applications + Software Management & Remote Push */}
+									<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+										<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
+											<SectionTitle icon="apps" text={`Installed Applications (${inspectDevice.installedApps?.length ?? 0})`} />
+											<div className="space-y-2 text-[13px] max-h-72 overflow-y-auto pr-1">
+												{(inspectDevice.installedApps ?? []).length === 0 && <span className="text-[12px] text-on-surface-variant">No inventory reported yet.</span>}
+												{(inspectDevice.installedApps ?? []).map((app) => (
+													<div key={app.id} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-outline-variant/30">
+														<div className="min-w-0">
+															<span className="font-semibold text-on-surface block truncate">{app.name}</span>
+															<span className="text-[11px] text-on-surface-variant">{[app.publisher, app.version].filter(Boolean).join(' · ') || '—'}</span>
+														</div>
+														<button onClick={() => handleUninstall(app)} title="Uninstall" className="ml-2 p-1.5 w-9 h-9 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/10 cursor-pointer shrink-0">
+															<span className="material-symbols-outlined text-lg">delete_sweep</span>
+														</button>
+													</div>
+												))}
+											</div>
+										</div>
+
+										<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
+											<SectionTitle icon="system_update_alt" text="Software Management & Remote Push" />
+											<div className="grid grid-cols-1 gap-3">
+												<button onClick={() => pushFileRef.current?.click()} className="flex items-center justify-center gap-2 p-3 bg-accent text-on-primary font-semibold text-[13px] rounded-xl hover:bg-primary/90 hover:text-white cursor-pointer">
+													<span className="material-symbols-outlined text-base">upload_file</span> Push MSI / EXE Installer
+												</button>
+												<input ref={pushFileRef} type="file" accept=".msi,.exe" hidden onChange={handlePushInstaller} />
+											</div>
+
+											<div className="pt-2 space-y-2">
+												<span className="text-[12px] font-bold text-on-surface-variant uppercase tracking-wider block">Recent Commands</span>
+												<div className="space-y-2 text-[12px]">
+													{(inspectDevice.commands ?? []).length === 0 && <span className="text-[12px] text-on-surface-variant">No software-management commands yet.</span>}
+													{(inspectDevice.commands ?? []).slice(0, 8).map((c) => {
+														const activeCmd = c.status === 'Pending' || c.status === 'Dispatched';
+														const elapsed = activeCmd && c.createdAt ? (nowTick - Date.parse(c.createdAt)) / 1000 : null;
+														return (
+															<div key={c.id} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-outline-variant/30">
+																<span className="text-on-surface font-medium truncate"><span className="font-semibold">{c.type}</span> — {c.targetAppName || c.packageName || '—'}{c.resultMessage ? <span className="text-on-surface-variant"> · {c.resultMessage}</span> : ''}</span>
+																<span className="flex items-center gap-2 shrink-0 ml-2">
+																	{elapsed != null && <span className="font-mono text-[11px] text-on-surface-variant">{fmtSecs(elapsed)}</span>}
+																	<span className={`px-2.5 py-0.5 rounded-md font-mono font-medium text-[11px] ${c.status === 'Succeeded' ? 'bg-primary/10 text-primary' : c.status === 'Failed' ? 'bg-error/10 text-error' : c.status === 'Cancelled' ? 'bg-surface-container-high text-on-surface-variant' : 'bg-surface-container-high text-on-surface'}`}>{c.status}</span>
+																	{activeCmd && (
+																		<button
+																			type="button"
+																			title="Cancel this command"
+																			disabled={cancellingCommandId === c.id}
+																			onClick={() => handleCancelCommand(c.id)}
+																			className="flex items-center justify-center w-6 h-6 rounded-md text-on-surface-variant hover:text-error hover:bg-error/10 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+																		>
+																			{cancellingCommandId === c.id ? <Loader2 size={14} className="animate-spin" /> : <StopCircle size={15} />}
+																		</button>
+																	)}
+																</span>
+															</div>
+														);
+													})}
+												</div>
+											</div>
+										</div>
+									</div>
+								</>
+							)}
 						</div>
 					</div>
 				</div>,
