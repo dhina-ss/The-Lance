@@ -1108,17 +1108,17 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice }) {
 							{/* Login logs (last 30 days) */}
 							<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-3">
 								<SectionTitle text="Login Logs (last 30 days)" />
-								{(inspectDevice.sessionEvents ?? []).length === 0 ? (
+								{(inspectDevice.sessionEvents ?? []).filter(sessionEventShown).length === 0 ? (
 									<p className="text-[12px] text-on-surface-variant">No login activity recorded yet.</p>
 								) : (
 									<div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-										{(inspectDevice.sessionEvents ?? []).map((e, i) => {
+										{(inspectDevice.sessionEvents ?? []).filter(sessionEventShown).map((e, i) => {
 											const meta = sessionEventMeta(e.type);
 											return (
 												<div key={i} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-outline-variant/30 text-[12px]">
 													<span className="flex items-center gap-2 font-medium text-on-surface">
 														<span className={`material-symbols-outlined text-[18px] ${meta.color}`}>{meta.icon}</span>
-														{meta.label}
+														{meta.label}{e.type === 'shutdown' && e.detail ? ' · off for ' + e.detail : ''}
 													</span>
 													<span className="font-mono text-on-surface-variant">{formatDateTime(e.at)}</span>
 												</div>
@@ -1353,11 +1353,16 @@ function fmtSecs(s) {
 }
 
 // Label + icon for a session event type (login / sleep / wake).
+function sessionEventShown(e) {
+	return ['login', 'lock', 'shutdown', 'alert'].includes((e.type || '').toLowerCase());
+}
+
 function sessionEventMeta(type) {
 	switch ((type || '').toLowerCase()) {
 		case 'login': return { label: 'Login', icon: 'login', color: 'text-emerald-600' };
-		case 'sleep': return { label: 'Sleep', icon: 'bedtime', color: 'text-amber-500' };
-		case 'wake': return { label: 'Wake', icon: 'wb_sunny', color: 'text-primary' };
+		case 'lock': return { label: 'Screen locked', icon: 'lock', color: 'text-amber-500' };
+		case 'shutdown': return { label: 'Shutdown', icon: 'power_settings_new', color: 'text-rose-600' };
+		case 'alert': return { label: 'Manager alerted', icon: 'notifications_active', color: 'text-rose-600' };
 		default: return { label: type || 'Event', icon: 'schedule', color: 'text-on-surface-variant' };
 	}
 }

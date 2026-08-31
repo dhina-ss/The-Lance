@@ -831,14 +831,39 @@ def ip_geolocate(ip):
     return None, None, None
 
 
-def record_session_event(cur, device_id, event_type, detail=None):
-    """Append a device session event (login / sleep / wake) and prune anything
-    older than 30 days. Best-effort: never raise into the caller's request."""
+# A heartbeat gap at least this long means the device was powered off / offline
+# in between (with a 5s heartbeat this is ~24 missed beats, so not a blip).
+SHUTDOWN_GAP_SECONDS = 120
+
+
+def _human_duration(seconds):
+    """Compact human duration, e.g. '45m', '2h 15m', '1d 3h'. Used for the
+    'shutdown' entry (how long the device was off)."""
+    seconds = int(max(0, seconds))
+    m = seconds // 60
+    if m < 60:
+        return f'{m}m'
+    h, m = divmod(m, 60)
+    if h < 24:
+        return f'{h}h {m}m' if m else f'{h}h'
+    d, h = divmod(h, 24)
+    return f'{d}d {h}h' if h else f'{d}d'
+
+
+def record_session_event(cur, device_id, event_type, detail=None, occurred_at=None):
+    """Append a device session event (login / lock / shutdown) and prune anything
+    older than 30 days. When occurred_at is given it is used verbatim (e.g. the
+    moment a device went offline); otherwise the current time is used.
+    Best-effort: never raise into the caller's request."""
     if not device_id:
         return
     try:
-        cur.execute('INSERT INTO device_session_events (device_id, event_type, detail) VALUES (%s,%s,%s);',
-                    (device_id, event_type, detail))
+        if occurred_at is not None:
+            cur.execute('INSERT INTO device_session_events (device_id, event_type, detail, occurred_at) '
+                        'VALUES (%s,%s,%s,%s);', (device_id, event_type, detail, occurred_at))
+        else:
+            cur.execute('INSERT INTO device_session_events (device_id, event_type, detail) VALUES (%s,%s,%s);',
+                        (device_id, event_type, detail))
         cur.execute("DELETE FROM device_session_events "
                     "WHERE occurred_at < CURRENT_TIMESTAMP - INTERVAL '30 days';")
     except Exception as e:
@@ -1080,11 +1105,18 @@ def device_heartbeat():
         conn = get_db_connection()
         cur = conn.cursor()
         public_ip = client_public_ip()
-        # If the device was suspended and is now sending a heartbeat, it woke up.
-        cur.execute('SELECT "SuspendedAt" FROM devices WHERE "DeviceId"=%s;', (device_id,))
+        # Detect a power-off / offline gap: if the previous heartbeat was long
+        # enough ago, the device was shut down (or asleep/offline) in between.
+        # Record a single 'shutdown' entry stamped when it went offline, with how
+        # long it stayed off. (No separate wake entry - the user only wants the
+        # shutdown with its duration.)
+        cur.execute('SELECT "LastHeartbeatTime" FROM devices WHERE "DeviceId"=%s;', (device_id,))
         _prev = cur.fetchone()
         if _prev and _prev[0] is not None:
-            record_session_event(cur, device_id, 'wake')
+            gap = (datetime.datetime.now(datetime.timezone.utc) - _prev[0]).total_seconds()
+            if gap >= SHUTDOWN_GAP_SECONDS:
+                record_session_event(cur, device_id, 'shutdown',
+                                     detail=_human_duration(gap), occurred_at=_prev[0])
         cur.execute(
             'UPDATE devices SET "LastSeen"=CURRENT_TIMESTAMP, "LastHeartbeatTime"=CURRENT_TIMESTAMP, '
             '"IPAddress"=COALESCE(%s,"IPAddress"), "Username"=COALESCE(%s,"Username"), '
@@ -1247,8 +1279,9 @@ def report_power_state():
         conn = get_db_connection()
         cur = conn.cursor()
         if suspended:
+            # Marks the Sleep status; the offline period itself is logged as a
+            # 'shutdown' entry (with duration) by the heartbeat gap detection.
             cur.execute('UPDATE devices SET "SuspendedAt"=CURRENT_TIMESTAMP WHERE "DeviceId"=%s;', (device_id,))
-            record_session_event(cur, device_id, 'sleep')
         else:
             cur.execute('UPDATE devices SET "SuspendedAt"=NULL WHERE "DeviceId"=%s;', (device_id,))
         conn.commit()
