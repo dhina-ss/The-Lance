@@ -92,7 +92,7 @@ export default function DashboardPage() {
                 <link rel="canonical" href={`${site}/dashboard`} />
             </Helmet>
 
-            <div className="relative h-screen bg-background flex flex-col lg:flex-row overflow-hidden">
+            <div className="relative h-screen bg-background flex flex-col lg:flex-row overflow-hidden dashboard-page">
                 {/* 20% Width Sidebar */}
                 <DashboardSidebar activeItem="overview" />
 

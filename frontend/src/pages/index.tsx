@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { motion, useInView, animate } from 'motion/react';
 import { CheckCircle, Globe, Smartphone, Cloud, Code2, Quote, Rocket, ShieldCheck } from 'lucide-react';
 import { home } from 'virtual:content';
+import { Heading3D } from '../components/Heading3D';
 
 const serviceIcons = [Globe, Smartphone, Cloud, Code2];
 
@@ -148,12 +149,9 @@ export default function HomePage() {
                                     </span>
                                 </motion.div>
 
-                                <motion.h1
-                                    variants={fadeUp}
-                                    className="text-5xl md:text-6xl lg:text-7xl font-bold text-primary leading-[1.05] tracking-tight mb-6"
-                                >
+                                <Heading3D as="h1" className="text-5xl md:text-6xl lg:text-7xl font-bold text-primary leading-[1.05] tracking-tight mb-6">
                                     {home.hero.headline}
-                                </motion.h1>
+                                </Heading3D>
 
                                 <motion.p
                                     variants={fadeUp}
@@ -404,9 +402,9 @@ export default function HomePage() {
                                 <div className="h-px w-8 bg-accent" />
                                 <span className="text-xs font-semibold tracking-widest text-accent uppercase">Services</span>
                             </motion.div>
-                            <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary tracking-tight mb-4">
+                            <Heading3D as="h2" className="text-4xl md:text-5xl font-bold text-primary tracking-tight mb-4">
                                 {home.services.heading}
-                            </motion.h2>
+                            </Heading3D>
                             <motion.p variants={fadeUp} className="text-md text-muted-foreground max-w-xl">
                                 {home.services.subheading}
                             </motion.p>
@@ -463,9 +461,9 @@ export default function HomePage() {
                                     <div className="h-px w-8 bg-accent" />
                                     <span className="text-xs font-semibold tracking-widest text-accent uppercase">Why The Lance</span>
                                 </motion.div>
-                                <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary tracking-tight leading-tight mb-6">
+                                <Heading3D as="h2" className="text-4xl md:text-5xl font-bold text-primary tracking-tight leading-tight mb-6">
                                     {home.about.heading}
-                                </motion.h2>
+                                </Heading3D>
                                 {home.about.body.map((p) => (
                                     <motion.p key={p.id} variants={fadeUp} className="text-md text-muted-foreground leading-relaxed">
                                         {p.text}
@@ -517,9 +515,9 @@ export default function HomePage() {
                                     <div className="h-px w-8 bg-accent" />
                                     <span className="text-xs font-semibold tracking-widest text-accent uppercase">Testimonials</span>
                                 </motion.div>
-                                <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary tracking-tight mb-4">
+                                <Heading3D as="h2" className="text-4xl md:text-5xl font-bold text-primary tracking-tight mb-4">
                                     {home.testimonials.heading}
-                                </motion.h2>
+                                </Heading3D>
                                 <motion.p variants={fadeUp} className="text-md text-muted-foreground">
                                     {home.testimonials.subheading}
                                 </motion.p>
@@ -658,9 +656,9 @@ export default function HomePage() {
                                 <div className="h-px w-8 bg-accent" />
                                 <span className="text-xs font-semibold tracking-widest text-accent uppercase">Get Started</span>
                             </motion.div>
-                            <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl lg:text-6xl font-bold text-primary-foreground tracking-tight leading-tight mb-6">
+                            <Heading3D as="h2" className="text-4xl md:text-5xl lg:text-6xl font-bold text-primary-foreground tracking-tight leading-tight mb-6">
                                 {home.cta.heading}
-                            </motion.h2>
+                            </Heading3D>
                             <motion.p variants={fadeUp} className="text-md text-primary-foreground/70 mb-10 leading-relaxed">
                                 {home.cta.subheading}
                             </motion.p>

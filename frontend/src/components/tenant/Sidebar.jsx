@@ -59,7 +59,7 @@ export default function Sidebar({ activeTab: externalActiveTab, setActiveTab: ex
 			<div className="space-y-6">
 				{/* Brand Header */}
 				<div
-					className="flex flex-col gap-3 items-start group cursor-pointer"
+					className="flex flex-col gap-3 items-start group"
 				>
 					<img
 						src="/assets/images/logo/logo-logo.webp"

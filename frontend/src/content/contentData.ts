@@ -276,10 +276,9 @@ export const contentData = {
 			{ id: "plan-inc-8", text: "Software Management" },
 			{ id: "plan-inc-9", text: "Real-time dashboard & reporting" },
 			{ id: "plan-inc-10", text: "Reporting & Analytics" },
-			{ id: "plan-inc-11", text: "24/7 Technical Support" },
+			{ id: "plan-inc-11", text: "8/7 Technical Support" },
 			{ id: "plan-inc-12", text: "Custom Integrations" },
-			{ id: "plan-inc-13", text: "Priority Support" },
-			{ id: "plan-inc-14", text: "Custom Security Policies" }
+			{ id: "plan-inc-13", text: "Custom Security Policies" }
 		],
 		faq: [
 			{ id: "faq-1", question: "Can I add or remove user seats at any time?", answer: "Yes, seats can be updated dynamically from your administrative management dashboard." },

@@ -47,7 +47,6 @@
     /* Typography */
     --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
     --font-heading: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-serif: ui-serif, Georgia, "Times New Roman", serif;
     --font-mono: ui-monospace, "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace;
 
     /* Border Radius */

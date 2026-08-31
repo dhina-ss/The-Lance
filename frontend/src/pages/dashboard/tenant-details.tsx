@@ -1169,7 +1169,7 @@ export default function TenantDetailsPage() {
                 </div>
             )}
 
-            <div className="relative h-screen bg-background flex flex-col lg:flex-row overflow-hidden">
+            <div className="relative h-screen bg-background flex flex-col lg:flex-row overflow-hidden dashboard-page">
                 <DashboardSidebar activeItem="tenants" />
 
                 <main className="w-full lg:w-[80%] flex-1 relative h-screen p-6 lg:p-10 overflow-y-auto overflow-x-hidden">

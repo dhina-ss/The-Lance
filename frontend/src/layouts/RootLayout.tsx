@@ -21,8 +21,9 @@ interface RootLayoutProps {
 
 export default function RootLayout({ children }: RootLayoutProps) {
     const location = useLocation();
-    const hideFooter = location.pathname === '/login' || location.pathname.includes('dashboard');
-    const hideHeader = location.pathname === '/login' || location.pathname.includes('dashboard');
+    const isDashboard = location.pathname.includes('dashboard');
+    const hideFooter = location.pathname === '/login' || isDashboard;
+    const hideHeader = location.pathname === '/login' || isDashboard;
 
     return (
         <Website>
@@ -32,7 +33,9 @@ export default function RootLayout({ children }: RootLayoutProps) {
             </Helmet>
             <ScrollRestoration />
             {!hideHeader && <Header />}
-            {children}
+            <div className={isDashboard ? 'dashboard-page flex-1 min-h-screen' : ''}>
+                {children}
+            </div>
             {!hideFooter && <Footer />}
         </Website>
     );

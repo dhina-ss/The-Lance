@@ -3,6 +3,7 @@ import { useState, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Mail, MapPin, Clock, CheckCircle, AlertCircle } from 'lucide-react';
 import { contact } from 'virtual:content';
+import { Heading3D } from '../components/Heading3D';
 
 const fadeUp = {
     hidden: { opacity: 0, y: 24 },
@@ -152,12 +153,9 @@ export default function ContactPage() {
                                     {contact.hero.eyebrow}
                                 </span>
                             </motion.div>
-                            <motion.h1
-                                variants={fadeUp}
-                                className="text-5xl md:text-6xl font-bold text-primary tracking-tight leading-tight mb-5"
-                            >
+                            <Heading3D as="h1" className="text-5xl md:text-6xl font-bold text-primary tracking-tight leading-tight mb-5">
                                 {contact.hero.heading}
-                            </motion.h1>
+                            </Heading3D>
                             <motion.p variants={fadeUp} className="text-md text-muted-foreground leading-relaxed">
                                 {contact.hero.subheading}
                             </motion.p>

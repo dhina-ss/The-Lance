@@ -42,7 +42,7 @@ export default function ActivityLog({ items = [] }) {
             <tr className="border-b border-border/60 text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground">
               <th className="py-3 px-4">Event Type</th>
               <th className="py-3 px-4">Subject Target</th>
-              <th className="py-3 px-4">Actor</th>
+              <th className="py-3 px-4">Device Name</th>
               <th className="py-3 px-4">Timestamp</th>
               <th className="py-3 px-4 text-center">Status</th>
             </tr>

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowRight } from 'lucide-react';
 import { work } from 'virtual:content';
+import { Heading3D } from '../components/Heading3D';
 
 const fadeUp = {
     hidden: { opacity: 0, y: 24 },
@@ -100,12 +101,9 @@ export default function WorkPage() {
                                     {work.hero.eyebrow}
                                 </span>
                             </motion.div>
-                            <motion.h1
-                                variants={fadeUp}
-                                className="text-5xl md:text-6xl font-bold text-primary tracking-tight leading-tight mb-6">
-
+                            <Heading3D as="h1" className="text-5xl md:text-6xl font-bold text-primary tracking-tight leading-tight mb-6">
                                 {work.hero.heading}
-                            </motion.h1>
+                            </Heading3D>
                             <motion.p variants={fadeUp} className="text-md text-muted-foreground leading-relaxed">
                                 {work.hero.subheading}
                             </motion.p>
@@ -227,9 +225,9 @@ export default function WorkPage() {
                                 <span className="text-xs font-semibold tracking-widest text-accent uppercase">Get Started</span>
                                 <div className="h-px w-8 bg-accent" />
                             </motion.div>
-                            <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary-foreground tracking-tight mb-4">
+                            <Heading3D as="h2" className="text-4xl md:text-5xl font-bold text-primary-foreground tracking-tight mb-4">
                                 {work.cta.heading}
-                            </motion.h2>
+                            </Heading3D>
                             <motion.p variants={fadeUp} className="text-md text-primary-foreground/70 mb-10 max-w-xl mx-auto">
                                 {work.cta.subheading}
                             </motion.p>

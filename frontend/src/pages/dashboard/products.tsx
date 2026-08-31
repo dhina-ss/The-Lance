@@ -341,7 +341,7 @@ export default function ProductConsolePage() {
                 <meta name="description" content="View and manage licensed products and tenant platforms across your organization." />
             </Helmet>
 
-            <div className="relative h-screen bg-background flex flex-col lg:flex-row overflow-hidden">
+            <div className="relative h-screen bg-background flex flex-col lg:flex-row overflow-hidden dashboard-page">
                 <DashboardSidebar activeItem="products" />
 
                 <main className="w-full lg:w-[80%] flex-1 relative h-screen p-6 lg:p-10 overflow-y-auto overflow-x-hidden">

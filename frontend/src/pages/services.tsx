@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Globe, Smartphone, Cloud, Code2, CheckCircle2, ArrowRight } from 'lucide-react';
 import { services } from 'virtual:content';
+import { Heading3D } from '../components/Heading3D';
 
 const serviceIcons = [Globe, Smartphone, Cloud, Code2];
 
@@ -103,12 +104,9 @@ export default function ServicesPage() {
                                     {services.hero.eyebrow}
                                 </span>
                             </motion.div>
-                            <motion.h1
-                                variants={fadeUp}
-                                className="text-5xl md:text-6xl font-bold text-primary tracking-tight leading-tight mb-6"
-                            >
+                            <Heading3D as="h1" className="text-5xl md:text-6xl font-bold text-primary tracking-tight leading-tight mb-6">
                                 {services.hero.heading}
-                            </motion.h1>
+                            </Heading3D>
                             <motion.p variants={fadeUp} className="text-md text-muted-foreground leading-relaxed">
                                 {services.hero.subheading}
                             </motion.p>
@@ -204,9 +202,9 @@ export default function ServicesPage() {
                                 <span className="text-xs font-semibold tracking-widest text-accent uppercase">Our Process</span>
                                 <div className="h-px w-8 bg-accent" />
                             </motion.div>
-                            <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary tracking-tight mb-4">
+                            <Heading3D as="h2" className="text-4xl md:text-5xl font-bold text-primary tracking-tight mb-4">
                                 {services.process.heading}
-                            </motion.h2>
+                            </Heading3D>
                             <motion.p variants={fadeUp} className="text-md text-muted-foreground max-w-xl mx-auto">
                                 {services.process.subheading}
                             </motion.p>
@@ -261,9 +259,9 @@ export default function ServicesPage() {
                                 <span className="text-xs font-semibold tracking-widest text-accent uppercase">Let's Build</span>
                                 <div className="h-px w-8 bg-accent" />
                             </motion.div>
-                            <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary-foreground tracking-tight mb-4">
+                            <Heading3D as="h2" className="text-4xl md:text-5xl font-bold text-primary-foreground tracking-tight mb-4">
                                 {services.cta.heading}
-                            </motion.h2>
+                            </Heading3D>
                             <motion.p variants={fadeUp} className="text-md text-primary-foreground/70 mb-10 max-w-xl mx-auto">
                                 {services.cta.subheading}
                             </motion.p>

@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle2, ShieldCheck, ArrowRight, Users, ChevronDown } from 'lucide-react';
 import { ems_pricing } from 'virtual:content';
+import { Heading3D } from '../../components/Heading3D';
 
 const fadeUp = {
     hidden: { opacity: 0, y: 20 },
@@ -26,22 +27,35 @@ export default function EmsPricingPage() {
     const [openFaq, setOpenFaq] = useState<string | null>(null);
 
     const p = ems_pricing.plans;
-    const isVolume = userCount > p.volume_threshold;
 
-    const unitPrice =
-        billing === 'yearly'
-            ? isVolume
-                ? p.price_volume_yearly
-                : p.price_yearly
-            : isVolume
-                ? p.price_volume_monthly
-                : p.price_monthly;
+    const getTieredUnitPrice = (count: number, isYearly: boolean) => {
+        let yearlyRate = 500;
+        if (count >= 251) {
+            yearlyRate = 450;
+        } else if (count >= 201) {
+            yearlyRate = 460;
+        } else if (count >= 151) {
+            yearlyRate = 470;
+        } else if (count >= 101) {
+            yearlyRate = 480;
+        } else if (count >= 51) {
+            yearlyRate = 490;
+        } else {
+            yearlyRate = 500;
+        }
+
+        return isYearly ? yearlyRate : Math.round(yearlyRate / 10);
+    };
+
+    const unitPrice = getTieredUnitPrice(userCount, billing === 'yearly');
+    const isVolume = userCount >= 51;
+    const baseUnitPrice = billing === 'yearly' ? p.price_yearly : p.price_monthly;
 
     const totalPrice = unitPrice * userCount;
 
     const annualEquivalent =
         billing === 'monthly'
-            ? (isVolume ? p.price_volume_monthly : p.price_monthly) * 12
+            ? unitPrice * 12
             : null;
 
     return (
@@ -78,13 +92,10 @@ export default function EmsPricingPage() {
                                 </span>
                                 <div className="h-px w-8 bg-accent" />
                             </motion.div>
-                            <motion.h1
-                                variants={fadeUp}
-                                className="text-4xl md:text-5xl lg:text-6xl font-bold text-primary tracking-tight mb-5"
-                            >
+                            <Heading3D as="h1" className="text-4xl md:text-5xl lg:text-6xl font-bold text-primary tracking-tight mb-5">
                                 {ems_pricing.hero.heading}
-                            </motion.h1>
-                            <motion.p variants={fadeUp} className="text-lg text-muted-foreground max-w-2xl mx-auto">
+                            </Heading3D>
+                            <motion.p variants={fadeUp} className="text-md text-muted-foreground max-w-2xl mx-auto">
                                 {ems_pricing.hero.subheading}
                             </motion.p>
                         </motion.div>
@@ -215,17 +226,36 @@ export default function EmsPricingPage() {
                                                 </label>
                                                 <div className="flex items-center gap-2">
                                                     <button
+                                                        type="button"
                                                         onClick={() => setUserCount(Math.max(1, userCount - 1))}
                                                         className="w-7 h-7 rounded-full border border-border flex items-center justify-center text-sm font-bold text-muted-foreground hover:border-accent hover:text-accent transition-colors"
+                                                        aria-label="Decrease users"
                                                     >
                                                         −
                                                     </button>
-                                                    <span className="w-10 text-center text-lg font-bold text-primary tabular-nums">
-                                                        {userCount}
-                                                    </span>
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        max={500}
+                                                        value={userCount === 0 ? '' : userCount}
+                                                        onChange={(e) => {
+                                                            const val = parseInt(e.target.value, 10);
+                                                            if (isNaN(val)) {
+                                                                setUserCount(0);
+                                                            } else {
+                                                                setUserCount(Math.max(1, Math.min(500, val)));
+                                                            }
+                                                        }}
+                                                        onBlur={() => {
+                                                            if (!userCount || userCount < 1) setUserCount(1);
+                                                        }}
+                                                        className="w-16 text-center text-lg font-bold text-primary tabular-nums bg-background border border-border hover:border-accent/60 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent rounded-lg py-0.5 transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                    />
                                                     <button
+                                                        type="button"
                                                         onClick={() => setUserCount(Math.min(500, userCount + 1))}
                                                         className="w-7 h-7 rounded-full border border-border flex items-center justify-center text-sm font-bold text-muted-foreground hover:border-accent hover:text-accent transition-colors"
+                                                        aria-label="Increase users"
                                                     >
                                                         +
                                                     </button>
@@ -234,19 +264,21 @@ export default function EmsPricingPage() {
                                             <input
                                                 type="range"
                                                 min={1}
-                                                max={200}
-                                                value={userCount}
+                                                max={500}
+                                                value={Math.min(500, userCount)}
                                                 onChange={(e) => setUserCount(Number(e.target.value))}
                                                 className="w-full h-2 rounded-full appearance-none cursor-pointer"
                                                 style={{
-                                                    background: `linear-gradient(to right, hsl(var(--accent)) 0%, hsl(var(--accent)) ${(userCount / 200) * 100}%, hsl(var(--border)) ${(userCount / 200) * 100}%, hsl(var(--border)) 100%)`,
+                                                    background: `linear-gradient(to right, hsl(var(--accent)) 0%, hsl(var(--accent)) ${(Math.min(500, userCount) / 500) * 100}%, hsl(var(--border)) ${(Math.min(500, userCount) / 500) * 100}%, hsl(var(--border)) 100%)`,
                                                 }}
                                             />
                                             <div className="flex justify-between text-xs text-muted-foreground mt-1">
                                                 <span>1</span>
-                                                <span className="text-accent font-semibold">10+ = volume rate</span>
-                                                <span>200</span>
+                                                <span className="text-accent font-semibold">Tiered rates (51+ users)</span>
+                                                <span>500</span>
                                             </div>
+
+                                        
                                         </div>
 
                                         {/* Total */}
@@ -276,7 +308,7 @@ export default function EmsPricingPage() {
                                             </div>
                                             {isVolume && (
                                                 <p className="text-xs text-accent mt-1 font-medium">
-                                                    You save {p.currency}{(billing === 'yearly' ? (p.price_yearly - p.price_volume_yearly) : (p.price_monthly - p.price_volume_monthly)) * userCount} with volume pricing
+                                                    You save {p.currency}{((baseUnitPrice - unitPrice) * userCount).toLocaleString()} with tiered volume pricing
                                                 </p>
                                             )}
                                         </div>
@@ -413,9 +445,9 @@ export default function EmsPricingPage() {
                                 <span className="text-xs font-semibold tracking-widest text-accent uppercase">Get Started</span>
                                 <div className="h-px w-8 bg-accent" />
                             </motion.div>
-                            <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary-foreground tracking-tight mb-4">
+                            <Heading3D as="h2" className="text-4xl md:text-5xl font-bold text-primary-foreground tracking-tight mb-4">
                                 {ems_pricing.cta.heading}
-                            </motion.h2>
+                            </Heading3D>
                             <motion.p variants={fadeUp} className="text-lg text-primary-foreground/70 mb-10 max-w-xl mx-auto">
                                 {ems_pricing.cta.subheading}
                             </motion.p>

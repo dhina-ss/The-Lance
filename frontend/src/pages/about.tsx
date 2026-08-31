@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Sparkles, ShieldCheck, Users, Telescope } from 'lucide-react';
 import { about } from 'virtual:content';
+import { Heading3D } from '../components/Heading3D';
 
 const valueIcons = [Sparkles, ShieldCheck, Users, Telescope];
 
@@ -102,12 +103,9 @@ export default function AboutPage() {
                                     {about.hero.eyebrow}
                                 </span>
                             </motion.div>
-                            <motion.h1
-                                variants={fadeUp}
-                                className="text-5xl md:text-6xl font-bold text-primary tracking-tight leading-tight mb-6"
-                            >
+                            <Heading3D as="h1" className="text-5xl md:text-6xl font-bold text-primary tracking-tight leading-tight mb-6">
                                 {about.hero.heading}
-                            </motion.h1>
+                            </Heading3D>
                             <motion.p variants={fadeUp} className="text-md text-muted-foreground leading-relaxed">
                                 {about.hero.subheading}
                             </motion.p>
@@ -129,9 +127,9 @@ export default function AboutPage() {
                                     <div className="h-px w-8 bg-accent" />
                                     <span className="text-xs font-semibold tracking-widest text-accent uppercase">Our Story</span>
                                 </motion.div>
-                                <motion.h2 variants={fadeUp} className="text-3xl md:text-4xl font-bold text-primary tracking-tight mb-8">
+                                <Heading3D as="h2" className="text-3xl md:text-4xl font-bold text-primary tracking-tight mb-8">
                                     {about.story.heading}
-                                </motion.h2>
+                                </Heading3D>
                                 {about.story.paragraphs.map((p) => (
                                     <motion.p key={p.id} variants={fadeUp} className="text-base text-muted-foreground leading-relaxed mb-5">
                                         {p.text}
@@ -192,9 +190,9 @@ export default function AboutPage() {
                                 <div className="h-px w-8 bg-accent" />
                                 <span className="text-xs font-semibold tracking-widest text-accent uppercase">Values</span>
                             </motion.div>
-                            <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary tracking-tight">
+                            <Heading3D as="h2" className="text-4xl md:text-5xl font-bold text-primary tracking-tight">
                                 {about.mission.heading}
-                            </motion.h2>
+                            </Heading3D>
                         </motion.div>
 
                         <motion.div
@@ -243,9 +241,9 @@ export default function AboutPage() {
                                 <div className="h-px w-8 bg-accent" />
                                 <span className="text-xs font-semibold tracking-widest text-accent uppercase">Team</span>
                             </motion.div>
-                            <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary tracking-tight mb-4">
+                            <Heading3D as="h2" className="text-4xl md:text-5xl font-bold text-primary tracking-tight mb-4">
                                 {about.team.heading}
-                            </motion.h2>
+                            </Heading3D>
                             <motion.p variants={fadeUp} className="text-md text-muted-foreground max-w-xl">
                                 {about.team.subheading}
                             </motion.p>
@@ -311,9 +309,9 @@ export default function AboutPage() {
                                 <div className="h-px w-8 bg-accent" />
                                 <span className="text-xs font-semibold tracking-widest text-accent uppercase">Work With Us</span>
                             </motion.div>
-                            <motion.h2 variants={fadeUp} className="text-4xl md:text-5xl font-bold text-primary-foreground tracking-tight leading-tight mb-4">
+                            <Heading3D as="h2" className="text-4xl md:text-5xl font-bold text-primary-foreground tracking-tight leading-tight mb-4">
                                 {about.cta.heading}
-                            </motion.h2>
+                            </Heading3D>
                             <motion.p variants={fadeUp} className="text-md text-primary-foreground/70 mb-10 leading-relaxed">
                                 {about.cta.subheading}
                             </motion.p>
