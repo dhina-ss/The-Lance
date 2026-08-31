@@ -1369,7 +1369,11 @@ function sessionEventMeta(type) {
 
 function formatDateTime(iso) {
 	if (!iso) return '—';
-	try { return new Date(iso).toLocaleString(); } catch { return iso; }
+	try {
+		return new Date(iso).toLocaleString(undefined, { hour12: true });
+	} catch {
+		return iso;
+	}
 }
 
 // Average duration (seconds) of completed commands of a given type, from their
