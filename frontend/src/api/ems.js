@@ -322,17 +322,22 @@ export async function createUser(input) {
     body: JSON.stringify(input),
   });
   if (!res.ok) {
-    if (res.status === 400 || res.status === 409) {
+    if (res.status === 400 || res.status === 409 || res.status === 403) {
       const body = await res.json().catch(() => null);
       if (body?.errors) {
         const first = Object.values(body.errors).flat()[0];
         if (first) throw new Error(first);
       }
-      throw new Error(body?.message ?? `The user could not be created (${res.status}).`);
+      throw new Error(body?.error ?? body?.message ?? `The user could not be created (${res.status}).`);
     }
     throwForStatus(res.status);
   }
   return res.json();
+}
+
+// Dashboard-user quota for the tenant: { limit, count }.
+export function fetchUserLimit() {
+  return getJson('/api/user-limit');
 }
 
 export async function updateUser(id, input) {

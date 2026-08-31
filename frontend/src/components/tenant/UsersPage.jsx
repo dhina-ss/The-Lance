@@ -1,9 +1,265 @@
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { Users, UserPlus, TrendingUp, BadgeCheck, Search, X, Mail, Lock, ShieldCheck, User, Pencil, Trash2, CheckCircle2, AlertTriangle, Eye, EyeOff } from 'lucide-react';
-import { fetchUsers, createUser, updateUser, deleteUser, relativeTime } from '../../api/ems';
+import { fetchUsers, createUser, updateUser, deleteUser, fetchUserLimit, relativeTime } from '../../api/ems';
 
 const AVATAR_BG = ['bg-primary', 'bg-accent', 'bg-emerald-600', 'bg-amber-600'];
+
+const DEFAULT_TENANT_ROLES = [
+	{
+		id: 'super_admin',
+		name: 'Super Admin',
+		isEditableName: false,
+		rules: [
+			'device_mgmt', 'device_mgmt:view', 'device_mgmt:remote_lock', 'device_mgmt:restart_shutdown', 'device_mgmt:gating',
+			'software_deploy', 'software_deploy:view', 'software_deploy:install', 'software_deploy:uninstall', 'software_deploy:upload',
+			'usb_url_rules', 'usb_url_rules:usb_blocking', 'usb_url_rules:website_blocking',
+			'user_mgmt', 'user_mgmt:view', 'user_mgmt:create', 'user_mgmt:edit', 'user_mgmt:delete',
+			'audit_geo', 'audit_geo:view_logs', 'audit_geo:live_map', 'audit_geo:export_logs',
+			'reports_export', 'reports_export:view_analytics', 'reports_export:download_pdf', 'reports_export:export_csv',
+		],
+		desc: 'Full administrative control over tenant workspace and security rules',
+	},
+	{
+		id: 'admin',
+		name: 'Admin',
+		isEditableName: false,
+		rules: [
+			'device_mgmt', 'device_mgmt:view', 'device_mgmt:remote_lock', 'device_mgmt:restart_shutdown',
+			'software_deploy', 'software_deploy:view', 'software_deploy:install',
+			'usb_url_rules', 'usb_url_rules:usb_blocking', 'usb_url_rules:website_blocking',
+			'user_mgmt', 'user_mgmt:view', 'user_mgmt:create',
+			'reports_export', 'reports_export:view_analytics', 'reports_export:download_pdf',
+		],
+		desc: 'Workspace administration and device fleet control',
+	},
+	{
+		id: 'role_1',
+		name: 'Role 1',
+		isEditableName: true,
+		rules: [
+			'device_mgmt', 'device_mgmt:view', 'device_mgmt:restart_shutdown',
+			'software_deploy', 'software_deploy:view', 'software_deploy:install',
+			'user_mgmt', 'user_mgmt:view',
+		],
+		desc: 'Customizable tenant role 1',
+	},
+	{
+		id: 'role_2',
+		name: 'Role 2',
+		isEditableName: true,
+		rules: [
+			'usb_url_rules', 'usb_url_rules:usb_blocking', 'usb_url_rules:website_blocking',
+			'audit_geo', 'audit_geo:view_logs', 'audit_geo:live_map',
+			'reports_export', 'reports_export:view_analytics',
+		],
+		desc: 'Customizable tenant role 2',
+	},
+	{
+		id: 'role_3',
+		name: 'Role 3',
+		isEditableName: true,
+		rules: [
+			'device_mgmt', 'device_mgmt:view',
+			'software_deploy', 'software_deploy:view',
+		],
+		desc: 'Customizable tenant role 3',
+	},
+];
+
+const AVAILABLE_RULES = [
+	{
+		id: 'device_mgmt',
+		label: 'Device Management & Fleet Control',
+		desc: 'View, monitor, and issue commands to connected devices',
+		subRules: [
+			{ id: 'device_mgmt:view', label: 'View Telemetry & Fleet Status', desc: 'Monitor live device heartbeats and system specs' },
+			{ id: 'device_mgmt:remote_lock', label: 'Remote Lock & Wipe Commands', desc: 'Execute emergency device lock and security wipe' },
+			{ id: 'device_mgmt:restart_shutdown', label: 'Power Control (Reboot/Shutdown)', desc: 'Send remote reboot and shutdown commands' },
+			{ id: 'device_mgmt:gating', label: 'Store Gating Controls', desc: 'Enable or disable Windows Store gating policy' },
+		],
+	},
+	{
+		id: 'software_deploy',
+		label: 'Software Deployment & Package Installs',
+		desc: 'Push silently installed software packages to endpoints',
+		subRules: [
+			{ id: 'software_deploy:view', label: 'View Installed Applications', desc: 'Inspect software inventory across all devices' },
+			{ id: 'software_deploy:install', label: 'Push App Package Installs', desc: 'Trigger remote silent software installations' },
+			{ id: 'software_deploy:uninstall', label: 'Queue Remote App Uninstallation', desc: 'Uninstall unwanted software packages' },
+			{ id: 'software_deploy:upload', label: 'Upload Installer Packages', desc: 'Upload new .exe or .msi installer files' },
+		],
+	},
+	{
+		id: 'usb_url_rules',
+		label: 'USB & Website Security Rules',
+		desc: 'Configure USB storage blocking and URL web filters',
+		subRules: [
+			{ id: 'usb_url_rules:usb_blocking', label: 'USB Storage Device Blocking Option', desc: 'Configure USB storage read/write blocking & mass storage lock' },
+			{ id: 'usb_url_rules:website_blocking', label: 'Website & URL Filtering Option', desc: 'Block domain categories, custom URL blacklists & web filters' },
+		],
+	},
+	{
+		id: 'user_mgmt',
+		label: 'User Account Management',
+		desc: 'Create, edit, and revoke dashboard & device user accounts',
+		subRules: [
+			{ id: 'user_mgmt:view', label: 'View Registered Accounts', desc: 'Browse employee list and assigned devices' },
+			{ id: 'user_mgmt:create', label: 'Register New EMS Users', desc: 'Create dashboard and device user accounts' },
+			{ id: 'user_mgmt:edit', label: 'Edit Credentials & Roles', desc: 'Modify employee codes, email addresses, and roles' },
+			{ id: 'user_mgmt:delete', label: 'Delete User Accounts', desc: 'Permanently remove user credentials from workspace' },
+		],
+	},
+	{
+		id: 'audit_geo',
+		label: 'Audit Logs & Device Geolocation',
+		desc: 'Access real-time authentication logs & GPS/IP location maps',
+		subRules: [
+			{ id: 'audit_geo:view_logs', label: 'View Real-time Audit Logs', desc: 'Stream security events and authentication attempts' },
+			{ id: 'audit_geo:live_map', label: 'Live Device Geolocation Map', desc: 'Track device IP/GPS location on interactive map' },
+			{ id: 'audit_geo:export_logs', label: 'Export Audit Logs', desc: 'Download security event history in CSV/JSON' },
+		],
+	},
+	{
+		id: 'reports_export',
+		label: 'Reports & Analytics Export',
+		desc: 'Generate system PDF/CSV performance and compliance reports',
+		subRules: [
+			{ id: 'reports_export:view_analytics', label: 'View Performance Matrix', desc: 'Analyze OS distribution and antivirus status' },
+			{ id: 'reports_export:download_pdf', label: 'Download PDF Security Reports', desc: 'Generate printable official PDF compliance reports' },
+			{ id: 'reports_export:export_csv', label: 'Export Fleet Metrics to CSV', desc: 'Export raw device metrics and inventory data' },
+		],
+	},
+];
+
+function isCategoryEnabled(activeRules, catId) {
+	if (!activeRules) return false;
+	return activeRules.includes(catId) || activeRules.some((r) => r.startsWith(catId + ':'));
+}
+
+function getSubRuleCount(activeRules, catObj) {
+	if (!activeRules || !catObj || !catObj.subRules) return 0;
+	return catObj.subRules.filter((sr) =>
+		activeRules.includes(sr.id) || activeRules.includes(catObj.id)
+	).length;
+}
+
+function toggleCategoryRules(activeRules, catObj) {
+	const enabled = isCategoryEnabled(activeRules, catObj.id);
+	const subIds = catObj.subRules.map((sr) => sr.id);
+	if (enabled) {
+		return activeRules.filter((r) => r !== catObj.id && !subIds.includes(r));
+	} else {
+		return Array.from(new Set([...activeRules, catObj.id, ...subIds]));
+	}
+}
+
+function toggleSubRulePermission(activeRules, catObj, subRuleId) {
+	const subIds = catObj.subRules.map((sr) => sr.id);
+	let currentSubs = catObj.subRules
+		.filter((sr) => activeRules.includes(sr.id) || activeRules.includes(catObj.id))
+		.map((sr) => sr.id);
+
+	if (currentSubs.includes(subRuleId)) {
+		currentSubs = currentSubs.filter((id) => id !== subRuleId);
+	} else {
+		currentSubs = [...currentSubs, subRuleId];
+	}
+
+	const cleaned = activeRules.filter((r) => r !== catObj.id && !subIds.includes(r));
+	if (currentSubs.length > 0) {
+		return [...cleaned, catObj.id, ...currentSubs];
+	} else {
+		return cleaned;
+	}
+}
+
+function PermissionsCategoryList({ currentRules, onChangeRules }) {
+	return (
+		<div className="space-y-2.5 bg-slate-100/50 p-3 rounded-xl border border-border/60 max-h-[360px] overflow-y-auto">
+			{AVAILABLE_RULES.map((rule) => {
+				const catEnabled = isCategoryEnabled(currentRules, rule.id);
+				const activeSubCount = getSubRuleCount(currentRules, rule);
+				const totalSubCount = rule.subRules.length;
+
+				return (
+					<div
+						key={rule.id}
+						className={`rounded-xl border transition-all ${
+							catEnabled
+								? 'bg-background border-primary/40 shadow-2xs'
+								: 'bg-background/60 border-border/80 opacity-85'
+						}`}
+					>
+						<label className="flex items-start gap-2.5 p-3 cursor-pointer">
+							<input
+								type="checkbox"
+								checked={catEnabled}
+								onChange={() => {
+									const nextRules = toggleCategoryRules(currentRules, rule);
+									onChangeRules(nextRules);
+								}}
+								className="mt-0.5 rounded border-input text-primary focus:ring-accent accent-accent cursor-pointer"
+							/>
+							<div className="flex-1 min-w-0">
+								<div className="flex items-center justify-between gap-2">
+									<span className="font-bold text-xs text-primary">{rule.label}</span>
+									{catEnabled && (
+										<span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 shrink-0">
+											{activeSubCount}/{totalSubCount} sub-rules active
+										</span>
+									)}
+								</div>
+								<p className="text-[10px] text-muted-foreground mt-0.5">{rule.desc}</p>
+							</div>
+						</label>
+
+						{/* Sub Category Permissions Card */}
+						{catEnabled && rule.subRules && rule.subRules.length > 0 && (
+							<div className="px-3 pb-3 pt-2 border-t border-border/40 bg-slate-50/80 rounded-b-xl space-y-2 border-l-3 border-l-primary">
+								<span className="text-[10px] font-extrabold uppercase tracking-wider text-primary flex items-center gap-1 block">
+									<ShieldCheck size={12} className="text-primary" /> Sub Category Permissions ({rule.label})
+								</span>
+								<div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+									{rule.subRules.map((sub) => {
+										const isSubChecked =
+											currentRules.includes(sub.id) ||
+											(currentRules.includes(rule.id) &&
+												!currentRules.some((r) => r.startsWith(rule.id + ':')));
+										return (
+											<label
+												key={sub.id}
+												className={`flex items-start gap-2 p-2 rounded-lg border text-[11px] transition-all cursor-pointer ${
+													isSubChecked
+														? 'bg-primary/10 border-primary/30 text-primary font-semibold'
+														: 'bg-background border-border/60 text-muted-foreground hover:bg-slate-100'
+												}`}
+											>
+												<input
+													type="checkbox"
+													checked={isSubChecked}
+													onChange={() => {
+														const nextRules = toggleSubRulePermission(currentRules, rule, sub.id);
+														onChangeRules(nextRules);
+													}}
+													className="mt-0.5 rounded border-input text-primary focus:ring-accent accent-accent cursor-pointer"
+												/>
+												<div>
+													<span className="block font-bold text-xs leading-tight">{sub.label}</span>
+													<span className="text-[10px] opacity-75 font-normal block leading-tight mt-0.5">{sub.desc}</span>
+												</div>
+											</label>
+										);
+									})}
+								</div>
+							</div>
+						)}
+					</div>
+				);
+			})}
+		</div>
+	);
+}
 
 function mapUser(u) {
 	const initials = (u.username || u.name || u.email || '?').slice(0, 2);
@@ -13,6 +269,9 @@ function mapUser(u) {
 		empCode: u.employeeCode || u.empCode || '—',
 		name: u.username || u.name || 'App User',
 		email: u.email,
+		type: u.type || u.userType || 'Device User',
+		role: u.role || (u.type === 'Device User' ? 'Device User' : 'Super Admin'),
+		rules: u.rules || ['device_mgmt', 'software_deploy', 'usb_url_rules', 'user_mgmt', 'audit_geo', 'reports_export'],
 		registered: u.createdDate || u.registered,
 		deviceId: u.deviceId,
 		deviceName: u.deviceName,
@@ -22,16 +281,42 @@ function mapUser(u) {
 
 export default function UsersPage({ onNavigateToDevice }) {
 	const [users, setUsers] = useState([]);
+	const [userLimit, setUserLimit] = useState(null);
 	const [loading, setLoading] = useState(true);
 	const [loadError, setLoadError] = useState(null);
 	const [searchTerm, setSearchTerm] = useState('');
 	const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
 
+	// Tenant Roles configuration state (5 roles: Super Admin, Admin, Role 1, Role 2, Role 3)
+	const [tenantRoles, setTenantRoles] = useState(() => {
+		try {
+			const saved = localStorage.getItem('ems_tenant_roles_v4');
+			return saved ? JSON.parse(saved) : DEFAULT_TENANT_ROLES;
+		} catch {
+			return DEFAULT_TENANT_ROLES;
+		}
+	});
+
+	useEffect(() => {
+		try {
+			localStorage.setItem('ems_tenant_roles_v4', JSON.stringify(tenantRoles));
+		} catch {}
+	}, [tenantRoles]);
+
+	const [isRolesModalOpen, setIsRolesModalOpen] = useState(false);
+	const [editingRoleNameId, setEditingRoleNameId] = useState(null);
+	const [tempRoleName, setTempRoleName] = useState('');
+
+	// Multi-step registration state
+	const [regStep, setRegStep] = useState(1);
 	const [newEmpCode, setNewEmpCode] = useState('');
 	const [newUsername, setNewUsername] = useState('');
 	const [newEmail, setNewEmail] = useState('');
 	const [newPassword, setNewPassword] = useState('');
 	const [newConfirmPassword, setNewConfirmPassword] = useState('');
+	const [newType, setNewType] = useState('Device User');
+	const [newRole, setNewRole] = useState('Super Admin');
+	const [newRules, setNewRules] = useState(tenantRoles[0]?.rules || []);
 	const [formError, setFormError] = useState('');
 	const [submitting, setSubmitting] = useState(false);
 
@@ -42,6 +327,9 @@ export default function UsersPage({ onNavigateToDevice }) {
 	const [editUsername, setEditUsername] = useState('');
 	const [editEmail, setEditEmail] = useState('');
 	const [editPassword, setEditPassword] = useState('');
+	const [editType, setEditType] = useState('Device User');
+	const [editRole, setEditRole] = useState('Super Admin');
+	const [editRules, setEditRules] = useState([]);
 	const [editError, setEditError] = useState('');
 	const [editSubmitting, setEditSubmitting] = useState(false);
 
@@ -63,6 +351,10 @@ export default function UsersPage({ onNavigateToDevice }) {
 		} finally {
 			setLoading(false);
 		}
+		try {
+			const q = await fetchUserLimit();
+			setUserLimit(typeof q?.limit === 'number' ? q.limit : null);
+		} catch { /* quota is best-effort */ }
 	};
 
 	useEffect(() => {
@@ -70,11 +362,11 @@ export default function UsersPage({ onNavigateToDevice }) {
 	}, []);
 
 	useEffect(() => {
-		document.body.style.overflow = isRegisterModalOpen || isEditModalOpen || isDeleteModalOpen ? 'hidden' : '';
+		document.body.style.overflow = isRegisterModalOpen || isEditModalOpen || isDeleteModalOpen || isRolesModalOpen ? 'hidden' : '';
 		return () => {
 			document.body.style.overflow = '';
 		};
-	}, [isRegisterModalOpen, isEditModalOpen, isDeleteModalOpen]);
+	}, [isRegisterModalOpen, isEditModalOpen, isDeleteModalOpen, isRolesModalOpen]);
 
 	useEffect(() => {
 		if (successMsg) {
@@ -84,16 +376,60 @@ export default function UsersPage({ onNavigateToDevice }) {
 	}, [successMsg]);
 
 	const resetForm = () => {
+		setRegStep(1);
 		setNewEmpCode('');
 		setNewUsername('');
 		setNewEmail('');
 		setNewPassword('');
 		setNewConfirmPassword('');
+		setNewType('Device User');
+		setNewRole(tenantRoles[0]?.name || 'Super Admin');
+		setNewRules(tenantRoles[0]?.rules || []);
 		setFormError('');
 	};
 
-	const handleRegisterUser = async (e) => {
-		e.preventDefault();
+	const handleRenameRole = (roleId, newName) => {
+		const trimmed = newName.trim();
+		if (!trimmed) return;
+		setTenantRoles((prev) =>
+			prev.map((r) => {
+				if (r.id === roleId && r.isEditableName) {
+					if (newRole === r.name) setNewRole(trimmed);
+					if (editRole === r.name) setEditRole(trimmed);
+					return { ...r, name: trimmed };
+				}
+				return r;
+			})
+		);
+		setEditingRoleNameId(null);
+		setSuccessMsg(`Role renamed to "${trimmed}" successfully!`);
+	};
+
+	const handleSaveRoleDefaultRules = (roleId, rulesToSave) => {
+		setTenantRoles((prev) =>
+			prev.map((r) => (r.id === roleId ? { ...r, rules: [...rulesToSave] } : r))
+		);
+		setSuccessMsg('Updated default permissions for role!');
+	};
+
+	const toggleRule = (ruleId) => {
+		setNewRules((prev) =>
+			prev.includes(ruleId) ? prev.filter((r) => r !== ruleId) : [...prev, ruleId]
+		);
+	};
+
+	const toggleEditRule = (ruleId) => {
+		setEditRules((prev) =>
+			prev.includes(ruleId) ? prev.filter((r) => r !== ruleId) : [...prev, ruleId]
+		);
+	};
+
+	const handleNextStep = (e) => {
+		if (e) e.preventDefault();
+		if (!newEmpCode.trim() || !newUsername.trim() || !newEmail.trim()) {
+			setFormError('Please fill in all required fields.');
+			return;
+		}
 		if (newPassword.length < 8) {
 			setFormError('Password must be at least 8 characters long.');
 			return;
@@ -102,20 +438,36 @@ export default function UsersPage({ onNavigateToDevice }) {
 			setFormError('Passwords do not match.');
 			return;
 		}
+		setFormError('');
+
+		if (newType === 'Dashboard User') {
+			setRegStep(2);
+		} else {
+			handleRegisterUser();
+		}
+	};
+
+	const handleRegisterUser = async () => {
 		setSubmitting(true);
 		setFormError('');
 		try {
+			const matchedRoleObj = tenantRoles.find((r) => r.name === newRole || r.id === newRole);
+			const assignedRules = matchedRoleObj ? matchedRoleObj.rules : newRules;
+
 			const created = await createUser({
 				email: newEmail.trim(),
 				employeeCode: newEmpCode.trim(),
 				username: newUsername.trim(),
 				password: newPassword,
 				confirmPassword: newConfirmPassword,
+				type: newType,
+				role: newType === 'Dashboard User' ? newRole : 'Device User',
+				rules: newType === 'Dashboard User' ? assignedRules : [],
 			});
 			setUsers((us) => [mapUser(created), ...us]);
 			resetForm();
 			setIsRegisterModalOpen(false);
-			setSuccessMsg('User account registered successfully!');
+			setSuccessMsg(`Registered ${newType === 'Dashboard User' ? `${newRole} account` : 'device user'} successfully!`);
 		} catch (err) {
 			setFormError(err instanceof Error ? err.message : 'Failed to register user.');
 		} finally {
@@ -128,6 +480,9 @@ export default function UsersPage({ onNavigateToDevice }) {
 		setEditEmpCode(user.empCode === '—' ? '' : user.empCode);
 		setEditUsername(user.name);
 		setEditEmail(user.email);
+		setEditType(user.type || 'Dashboard User');
+		setEditRole(user.role || 'Tenant Admin');
+		setEditRules(user.rules || ['device_mgmt', 'software_deploy', 'usb_url_rules', 'user_mgmt', 'audit_geo', 'reports_export']);
 		setEditPassword('');
 		setEditError('');
 		setIsEditModalOpen(true);
@@ -148,6 +503,9 @@ export default function UsersPage({ onNavigateToDevice }) {
 				employeeCode: editEmpCode.trim(),
 				username: editUsername.trim(),
 				password: editPassword,
+				type: editType,
+				role: editType === 'Dashboard User' ? editRole : 'Device User',
+				rules: editType === 'Dashboard User' ? editRules : [],
 			});
 			setUsers((us) =>
 				us.map((u) => (u.id === editingUser.id ? mapUser({ ...u, ...updated }) : u))
@@ -187,7 +545,7 @@ export default function UsersPage({ onNavigateToDevice }) {
 		const term = searchTerm.toLowerCase();
 		return (
 			!term ||
-			[u.name, u.email, u.empCode, u.deviceId, u.deviceName].filter(Boolean).some((v) => v.toLowerCase().includes(term))
+			[u.name, u.email, u.empCode, u.type, u.role, u.deviceId, u.deviceName].filter(Boolean).some((v) => v.toLowerCase().includes(term))
 		);
 	});
 
@@ -230,17 +588,31 @@ export default function UsersPage({ onNavigateToDevice }) {
 				<div className="p-6 border-b border-border/60 space-y-4">
 					<div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
 						<div>
-							<h2 className="text-xl font-extrabold text-primary tracking-tight">User Management</h2>
+							<h2 className="text-xl font-extrabold text-primary tracking-tight inline-flex items-center gap-2.5">User Management
+									{userLimit != null && (
+										<span className={`px-2.5 py-0.5 text-[11px] font-bold rounded-full border ${users.length >= userLimit ? 'bg-rose-500/10 text-rose-600 border-rose-500/20' : 'bg-primary/10 text-primary border-primary/20'}`}>{users.length} / {userLimit} users</span>
+									)}
+								</h2>
 							<p className="text-xs text-muted-foreground mt-0.5">Manage EMS accounts that activate and manage the fleet</p>
 						</div>
-						<button onClick={() => setIsRegisterModalOpen(true)} className="px-4 py-2.5 bg-primary text-primary-foreground hover:bg-accent hover:text-accent-foreground rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer">
-							<UserPlus size={16} /> Register User
-						</button>
+						<div className="flex items-center gap-2.5">
+							<button onClick={() => setIsRolesModalOpen(true)} className="px-3.5 py-2.5 bg-background border border-border/80 text-primary hover:bg-slate-100 rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all cursor-pointer">
+								<ShieldCheck size={16} /> Roles & Rules
+							</button>
+							<button
+								onClick={() => setIsRegisterModalOpen(true)}
+								disabled={userLimit != null && users.length >= userLimit}
+								title={userLimit != null && users.length >= userLimit ? `User limit reached (${userLimit}). Contact the software owner to increase it.` : 'Register a new dashboard user'}
+								className="px-4 py-2.5 bg-primary text-primary-foreground hover:bg-accent hover:text-accent-foreground rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary disabled:hover:text-primary-foreground"
+							>
+								<UserPlus size={16} /> Register User
+							</button>
+						</div>
 					</div>
 
 					<div className="relative w-full lg:max-w-xs">
 						<Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={16} />
-						<input type="text" placeholder="Search name, email, emp code..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-background border border-input rounded-xl pl-9 pr-4 py-2 text-xs font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all" />
+						<input type="text" placeholder="Search name, email, type, emp code..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-background border border-input rounded-xl pl-9 pr-4 py-2 text-xs font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all" />
 					</div>
 				</div>
 
@@ -251,6 +623,7 @@ export default function UsersPage({ onNavigateToDevice }) {
 								<th className="px-6 py-3.5 w-14 text-center">#</th>
 								<th className="px-6 py-3.5">User</th>
 								<th className="px-6 py-3.5">Emp Code</th>
+								<th className="px-6 py-3.5">User Type</th>
 								<th className="px-6 py-3.5">Email</th>
 								<th className="px-6 py-3.5">Device Name</th>
 								<th className="px-6 py-3.5 text-center">Status</th>
@@ -260,7 +633,7 @@ export default function UsersPage({ onNavigateToDevice }) {
 						</thead>
 						<tbody className="divide-y divide-border/40 text-xs">
 							{loading ? (
-								<tr><td colSpan={8} className="py-12 text-center text-muted-foreground">Loading users…</td></tr>
+								<tr><td colSpan={9} className="py-12 text-center text-muted-foreground">Loading users…</td></tr>
 							) : filteredUsers.length > 0 ? (
 								filteredUsers.map((u, index) => (
 									<tr key={u.id} className="hover:bg-slate-100/80 transition-colors">
@@ -274,6 +647,15 @@ export default function UsersPage({ onNavigateToDevice }) {
 										</td>
 										<td className="px-6 py-4">
 											<span className="inline-block px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold bg-slate-100 text-primary border border-border/60">{u.empCode}</span>
+										</td>
+										<td className="px-6 py-4">
+											<span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+												u.type === 'Device User'
+													? 'bg-amber-500/10 text-amber-600 border-amber-500/30'
+													: 'bg-primary/10 text-primary border-primary/20'
+											}`}>
+												{u.type || 'Dashboard User'}
+											</span>
 										</td>
 										<td className="px-6 py-4 text-muted-foreground font-medium">{u.email}</td>
 										<td className="px-6 py-4">
@@ -330,7 +712,7 @@ export default function UsersPage({ onNavigateToDevice }) {
 									</tr>
 								))
 							) : (
-								<tr><td colSpan={8} className="py-12 text-center text-muted-foreground">No users found.</td></tr>
+								<tr><td colSpan={9} className="py-12 text-center text-muted-foreground">No users found.</td></tr>
 							)}
 						</tbody>
 					</table>
@@ -345,15 +727,21 @@ export default function UsersPage({ onNavigateToDevice }) {
 			{/* Register Modal */}
 			{isRegisterModalOpen && ReactDOM.createPortal(
 				<div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-					<div className="bg-background border border-border/80 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-5">
+					<div className="bg-background border border-border/80 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
 						<div className="flex justify-between items-center border-b border-border/60 pb-4">
 							<div className="flex items-center gap-3">
-								<div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-									<UserPlus size={20} />
+								<div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold">
+									{regStep === 1 ? <UserPlus size={20} /> : <ShieldCheck size={20} />}
 								</div>
 								<div>
-									<h3 className="text-base font-bold text-primary">Register User</h3>
-									<p className="text-xs text-muted-foreground">Create a new EMS account</p>
+									<h3 className="text-base font-bold text-primary">
+										{regStep === 1 ? 'Register User' : 'Assign Tenant Role'}
+									</h3>
+									<p className="text-xs text-muted-foreground">
+										{regStep === 1
+											? 'Step 1 of 2: Basic Account Details'
+											: 'Step 2 of 2: Select Tenant Administrative Role'}
+									</p>
 								</div>
 							</div>
 							<button onClick={() => { setIsRegisterModalOpen(false); resetForm(); }} className="w-8 h-8 rounded-full text-muted-foreground hover:text-primary hover:bg-slate-100 cursor-pointer flex items-center justify-center">
@@ -361,21 +749,192 @@ export default function UsersPage({ onNavigateToDevice }) {
 							</button>
 						</div>
 
-						<form onSubmit={handleRegisterUser} className="space-y-4 text-xs">
-							<FormField label="Employee Code" required mono value={newEmpCode} onChange={setNewEmpCode} placeholder="e.g. EMP1001" />
-							<FormField label="Username" required value={newUsername} onChange={setNewUsername} placeholder="e.g. john.doe" />
-							<FormField label="Email Address" required type="email" value={newEmail} onChange={setNewEmail} placeholder="e.g. john.doe@enterprise.com" />
-							<FormField label="Password" required type="password" minLength={8} value={newPassword} onChange={(v) => { setNewPassword(v); if (formError) setFormError(''); }} placeholder="At least 8 characters" />
-							<FormField label="Confirm Password" required type="password" minLength={8} value={newConfirmPassword} onChange={(v) => { setNewConfirmPassword(v); if (formError) setFormError(''); }} placeholder="At least 8 characters" />
-							{formError && <p className="text-xs text-rose-500 font-semibold">{formError}</p>}
-
-							<div className="flex items-center justify-end gap-3 pt-3 border-t border-border/60">
-								<button type="button" onClick={() => { setIsRegisterModalOpen(false); resetForm(); }} className="px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-slate-100 rounded-xl cursor-pointer">Cancel</button>
-								<button type="submit" disabled={submitting} className="px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-sm hover:bg-accent hover:text-accent-foreground cursor-pointer transition-all disabled:opacity-60">
-									{submitting ? 'Registering…' : 'Register User'}
+						{/* Step indicator pills */}
+						{newType === 'Dashboard User' && (
+							<div className="flex items-center gap-2 bg-slate-100/80 p-1.5 rounded-xl border border-border/60 text-xs">
+								<button
+									type="button"
+									onClick={() => setRegStep(1)}
+									className={`flex-1 py-1.5 rounded-lg font-bold transition-all text-center ${
+										regStep === 1 ? 'bg-primary text-primary-foreground shadow-xs' : 'text-muted-foreground hover:text-primary'
+									}`}
+								>
+									1. Account Details
+								</button>
+								<button
+									type="button"
+									onClick={() => {
+										if (newUsername && newEmail && newPassword.length >= 8 && newPassword === newConfirmPassword) {
+											setFormError('');
+											setRegStep(2);
+										} else {
+											setFormError('Please fill in valid account details first.');
+										}
+									}}
+									className={`flex-1 py-1.5 rounded-lg font-bold transition-all text-center ${
+										regStep === 2 ? 'bg-primary text-primary-foreground shadow-xs' : 'text-muted-foreground hover:text-primary'
+									}`}
+								>
+									2. Select Role
 								</button>
 							</div>
-						</form>
+						)}
+
+						{regStep === 1 ? (
+							<form onSubmit={handleNextStep} className="space-y-4 text-xs">
+								<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+									<FormField label="Employee Code" required mono value={newEmpCode} onChange={setNewEmpCode} placeholder="e.g. EMP1001" />
+									<CustomSelect
+										label="User Type"
+										required
+										value={newType}
+										onChange={(val) => {
+											setNewType(val);
+											if (val === 'Device User') setRegStep(1);
+										}}
+										options={[
+											{ value: 'Device User', label: 'Device User' },
+											{ value: 'Dashboard User', label: 'Dashboard User' },
+										]}
+									/>
+								</div>
+								<p className="text-[11px] text-muted-foreground -mt-2">
+									{newType === 'Dashboard User'
+										? 'Dashboard users have portal access with assigned roles & permission rules.'
+										: 'Device users are assigned directly to endpoints without administrative portal access.'}
+								</p>
+								<FormField label="Username" required value={newUsername} onChange={setNewUsername} placeholder="e.g. john.doe" />
+								<FormField label="Email Address" required type="email" value={newEmail} onChange={setNewEmail} placeholder="e.g. john.doe@enterprise.com" />
+								<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+									<FormField label="Password" required type="password" minLength={8} value={newPassword} onChange={(v) => { setNewPassword(v); if (formError) setFormError(''); }} placeholder="At least 8 characters" />
+									<FormField label="Confirm Password" required type="password" minLength={8} value={newConfirmPassword} onChange={(v) => { setNewConfirmPassword(v); if (formError) setFormError(''); }} placeholder="At least 8 characters" />
+								</div>
+								{formError && <p className="text-xs text-rose-500 font-semibold">{formError}</p>}
+
+								<div className="flex items-center justify-end gap-3 pt-3 border-t border-border/60">
+									<button type="button" onClick={() => { setIsRegisterModalOpen(false); resetForm(); }} className="px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-slate-100 rounded-xl cursor-pointer">Cancel</button>
+									<button type="submit" className="px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-sm hover:bg-accent hover:text-accent-foreground cursor-pointer transition-all">
+										{newType === 'Dashboard User' ? 'Next: Select Role →' : 'Register User'}
+									</button>
+								</div>
+							</form>
+						) : (
+							<div className="space-y-4 text-xs">
+								<div>
+									<div className="flex items-center justify-between mb-2">
+										<label className="text-xs font-bold text-primary block">
+											Select Tenant Role <span className="text-rose-500">*</span>
+										</label>
+										<span className="text-[10px] text-muted-foreground">
+											Super Admin & Admin fixed; Role 1-3 editable
+										</span>
+									</div>
+									<div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+										{tenantRoles.map((role) => {
+											const isSelected = newRole === role.name || newRole === role.id;
+											const isEditingThisName = editingRoleNameId === role.id;
+
+											return (
+												<div
+													key={role.id}
+													onClick={() => {
+														setNewRole(role.name);
+														setNewRules([...role.rules]);
+													}}
+													className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative ${
+														isSelected
+															? 'bg-primary/10 border-primary text-primary font-bold shadow-xs'
+															: 'bg-background border-border/80 text-muted-foreground hover:border-primary/50'
+													}`}
+												>
+													<div className="flex items-center justify-between gap-2 mb-1">
+														{isEditingThisName ? (
+															<div className="flex items-center gap-1 w-full" onClick={(e) => e.stopPropagation()}>
+																<input
+																	type="text"
+																	value={tempRoleName}
+																	onChange={(e) => setTempRoleName(e.target.value)}
+																	onKeyDown={(e) => {
+																		if (e.key === 'Enter') handleRenameRole(role.id, tempRoleName);
+																	}}
+																	autoFocus
+																	className="w-full bg-background border border-primary rounded-lg px-2 py-0.5 text-xs font-bold text-primary focus:outline-none"
+																/>
+																<button
+																	type="button"
+																	onClick={() => handleRenameRole(role.id, tempRoleName)}
+																	className="bg-primary text-primary-foreground font-bold px-2 py-0.5 text-[10px] rounded-md shrink-0 cursor-pointer"
+																>
+																	Save
+																</button>
+															</div>
+														) : (
+															<>
+																<span className="font-bold text-xs flex items-center gap-1.5 truncate">
+																	{role.name}
+																	{!role.isEditableName ? (
+																		<span title="Locked role name (Super Admin / Admin)" className="text-muted-foreground/70">
+																			<Lock size={11} />
+																		</span>
+																	) : (
+																		<button
+																			type="button"
+																			onClick={(e) => {
+																				e.stopPropagation();
+																				setEditingRoleNameId(role.id);
+																				setTempRoleName(role.name);
+																			}}
+																			title="Rename role"
+																			className="p-1 rounded hover:bg-slate-200 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+																		>
+																			<Pencil size={11} />
+																		</button>
+																	)}
+																</span>
+																{isSelected && <CheckCircle2 size={14} className="text-primary shrink-0" />}
+															</>
+														)}
+													</div>
+													<span className="text-[10px] opacity-75 font-normal block truncate">
+														{role.desc}
+													</span>
+												</div>
+											);
+										})}
+									</div>
+								</div>
+
+								<div className="bg-slate-100/70 border border-border/80 rounded-xl p-3.5 space-y-1.5 text-[11px]">
+									<div className="flex items-center gap-2 font-extrabold text-primary">
+										<ShieldCheck size={16} className="text-primary" />
+										<span>Permissions Inherited from Role</span>
+									</div>
+									<p className="text-muted-foreground leading-relaxed">
+										This account will automatically inherit all permissions and sub-category security rules assigned to <span className="font-bold text-primary">{newRole}</span>. You can manage or customize role permissions anytime in <span className="font-semibold text-primary">Roles & Rules</span> settings.
+									</p>
+								</div>
+
+								{formError && <p className="text-xs text-rose-500 font-semibold">{formError}</p>}
+
+								<div className="flex items-center justify-between gap-3 pt-3 border-t border-border/60">
+									<button
+										type="button"
+										onClick={() => setRegStep(1)}
+										className="px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-slate-100 rounded-xl cursor-pointer"
+									>
+										Back to Account Info
+									</button>
+									<button
+										type="button"
+										disabled={submitting}
+										onClick={handleRegisterUser}
+										className="px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-sm hover:bg-accent hover:text-accent-foreground cursor-pointer transition-all disabled:opacity-60"
+									>
+										{submitting ? 'Creating Account…' : 'Complete Registration'}
+									</button>
+								</div>
+							</div>
+						)}
 					</div>
 				</div>,
 				document.body
@@ -384,15 +943,15 @@ export default function UsersPage({ onNavigateToDevice }) {
 			{/* Edit Modal */}
 			{isEditModalOpen && ReactDOM.createPortal(
 				<div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-					<div className="bg-background border border-border/80 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-5">
+					<div className="bg-background border border-border/80 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
 						<div className="flex justify-between items-center border-b border-border/60 pb-4">
 							<div className="flex items-center gap-3">
 								<div className="w-10 h-10 rounded-xl bg-accent/10 text-accent flex items-center justify-center">
 									<Pencil size={20} />
 								</div>
 								<div>
-									<h3 className="text-base font-bold text-primary">Edit User</h3>
-									<p className="text-xs text-muted-foreground">Update user account details</p>
+									<h3 className="text-base font-bold text-primary">Edit User Account</h3>
+									<p className="text-xs text-muted-foreground">Update account credentials, roles, and access rules</p>
 								</div>
 							</div>
 							<button onClick={() => { setIsEditModalOpen(false); setEditingUser(null); }} className="w-8 h-8 rounded-full text-muted-foreground hover:text-primary hover:bg-slate-100 cursor-pointer flex items-center justify-center">
@@ -401,8 +960,113 @@ export default function UsersPage({ onNavigateToDevice }) {
 						</div>
 
 						<form onSubmit={handleUpdateUser} className="space-y-4 text-xs">
-							<FormField label="Employee Code" required mono value={editEmpCode} onChange={setEditEmpCode} placeholder="e.g. EMP1001" />
+							<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+								<FormField label="Employee Code" required mono value={editEmpCode} onChange={setEditEmpCode} placeholder="e.g. EMP1001" />
+								<CustomSelect
+									label="User Type"
+									required
+									value={editType}
+									onChange={setEditType}
+									options={[
+										{ value: 'Device User', label: 'Device User' },
+										{ value: 'Dashboard User', label: 'Dashboard User' },
+									]}
+								/>
+							</div>
 							<FormField label="Username" required value={editUsername} onChange={setEditUsername} placeholder="e.g. john.doe" />
+
+							{editType === 'Dashboard User' && (
+								<>
+									<div>
+										<div className="flex items-center justify-between mb-2">
+											<label className="text-xs font-bold text-primary block">
+												Tenant Role <span className="text-rose-500">*</span>
+											</label>
+											<span className="text-[10px] text-muted-foreground">
+												Role 1-3 names editable
+											</span>
+										</div>
+										<div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+											{tenantRoles.map((role) => {
+												const isSelected = editRole === role.name || editRole === role.id;
+												const isEditingThisName = editingRoleNameId === role.id;
+
+												return (
+													<div
+														key={role.id}
+														onClick={() => {
+															setEditRole(role.name);
+															setEditRules([...role.rules]);
+														}}
+														className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer relative ${
+															isSelected
+																? 'bg-accent/15 border-accent text-accent-foreground font-bold shadow-xs'
+																: 'bg-background border-border/80 text-muted-foreground hover:border-accent/50'
+														}`}
+													>
+														<div className="flex items-center justify-between gap-2">
+															{isEditingThisName ? (
+																<div className="flex items-center gap-1 w-full" onClick={(e) => e.stopPropagation()}>
+																	<input
+																		type="text"
+																		value={tempRoleName}
+																		onChange={(e) => setTempRoleName(e.target.value)}
+																		onKeyDown={(e) => {
+																			if (e.key === 'Enter') handleRenameRole(role.id, tempRoleName);
+																		}}
+																		autoFocus
+																		className="w-full bg-background border border-accent rounded-lg px-2 py-0.5 text-xs font-bold text-primary focus:outline-none"
+																	/>
+																	<button
+																		type="button"
+																		onClick={() => handleRenameRole(role.id, tempRoleName)}
+																		className="bg-accent text-accent-foreground font-bold px-2 py-0.5 text-[10px] rounded-md shrink-0 cursor-pointer"
+																	>
+																		Save
+																	</button>
+																</div>
+															) : (
+																<>
+																	<span className="font-bold text-xs flex items-center gap-1.5 truncate">
+																		{role.name}
+																		{!role.isEditableName ? (
+																			<span title="Locked role name (Super Admin / Admin)" className="text-muted-foreground/70">
+																				<Lock size={11} />
+																			</span>
+																		) : (
+																			<button
+																				type="button"
+																				onClick={(e) => {
+																					e.stopPropagation();
+																					setEditingRoleNameId(role.id);
+																					setTempRoleName(role.name);
+																				}}
+																				title="Edit role name"
+																				className="p-1 rounded hover:bg-slate-200 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+																			>
+																				<Pencil size={11} />
+																			</button>
+																		)}
+																	</span>
+																	{isSelected && <CheckCircle2 size={14} className="text-accent shrink-0" />}
+																</>
+															)}
+														</div>
+													</div>
+												);
+											})}
+										</div>
+									</div>
+
+									<div>
+										<label className="text-xs font-bold text-primary block mb-1.5">
+											Access Rules & Permissions
+										</label>
+										<PermissionsCategoryList currentRules={editRules} onChangeRules={setEditRules} />
+									</div>
+								</>
+							)}
+
 							<FormField label="Email Address" required type="email" value={editEmail} onChange={setEditEmail} placeholder="e.g. john.doe@enterprise.com" />
 							<FormField label="New Password" type="password" minLength={8} value={editPassword} onChange={(v) => { setEditPassword(v); if (editError) setEditError(''); }} placeholder="Leave blank or enter at least 8 characters" />
 							{editError && <p className="text-xs text-rose-500 font-semibold">{editError}</p>}
@@ -460,6 +1124,123 @@ export default function UsersPage({ onNavigateToDevice }) {
 				</div>,
 				document.body
 			)}
+
+			{/* Manage Tenant Roles Modal */}
+			{isRolesModalOpen && ReactDOM.createPortal(
+				<div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+					<div className="bg-background border border-border/80 rounded-2xl p-6 max-w-2xl w-full shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+						<div className="flex justify-between items-center border-b border-border/60 pb-4">
+							<div className="flex items-center gap-3">
+								<div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold">
+									<ShieldCheck size={20} />
+								</div>
+								<div>
+									<h3 className="text-base font-bold text-primary">Tenant Roles & Access Rules</h3>
+									<p className="text-xs text-muted-foreground">Manage role names and customize access permissions across your tenant</p>
+								</div>
+							</div>
+							<button onClick={() => setIsRolesModalOpen(false)} className="w-8 h-8 rounded-full text-muted-foreground hover:text-primary hover:bg-slate-100 cursor-pointer flex items-center justify-center">
+								<X size={18} />
+							</button>
+						</div>
+
+						<div className="space-y-4 text-xs">
+							<div className="bg-slate-100/60 p-3 rounded-xl border border-border/60 text-muted-foreground text-[11px]">
+								<p className="font-semibold text-primary mb-0.5">Role Naming & Permission Rules:</p>
+								<ul className="list-disc list-inside space-y-0.5">
+									<li><span className="font-bold text-primary">Super Admin</span> & <span className="font-bold text-primary">Admin</span> role names are system-locked and cannot be edited.</li>
+									<li><span className="font-bold text-primary">Role 1</span>, <span className="font-bold text-primary">Role 2</span>, and <span className="font-bold text-primary">Role 3</span> names can be customized.</li>
+									<li>Permission rules for all 5 roles can be customized below.</li>
+								</ul>
+							</div>
+
+							<div className="space-y-4">
+								{tenantRoles.map((role) => (
+									<div key={role.id} className="p-4 rounded-xl border border-border/80 bg-background space-y-3 shadow-2xs">
+										<div className="flex items-center justify-between gap-3 border-b border-border/40 pb-2.5">
+											<div className="flex items-center gap-2">
+												{editingRoleNameId === role.id ? (
+													<div className="flex items-center gap-2">
+														<input
+															type="text"
+															value={tempRoleName}
+															onChange={(e) => setTempRoleName(e.target.value)}
+															onKeyDown={(e) => {
+																if (e.key === 'Enter') handleRenameRole(role.id, tempRoleName);
+															}}
+															autoFocus
+															className="bg-background border border-primary rounded-lg px-2.5 py-1 text-xs font-bold text-primary focus:outline-none"
+														/>
+														<button
+															type="button"
+															onClick={() => handleRenameRole(role.id, tempRoleName)}
+															className="px-2.5 py-1 bg-primary text-primary-foreground font-bold text-xs rounded-lg cursor-pointer"
+														>
+															Save
+														</button>
+													</div>
+												) : (
+													<>
+														<span className="text-sm font-extrabold text-primary flex items-center gap-1.5">
+															{role.name}
+															{!role.isEditableName ? (
+																<span className="text-[10px] bg-slate-200 text-muted-foreground px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+																	<Lock size={10} /> Locked
+																</span>
+															) : (
+																<button
+																	type="button"
+																	onClick={() => {
+																		setEditingRoleNameId(role.id);
+																		setTempRoleName(role.name);
+																	}}
+																	className="p-1 text-muted-foreground hover:text-primary hover:bg-slate-100 rounded cursor-pointer"
+																	title="Edit role name"
+																>
+																	<Pencil size={13} />
+																</button>
+															)}
+														</span>
+													</>
+												)}
+											</div>
+											<span className="text-[11px] text-muted-foreground font-semibold">
+												{role.rules.length} of {AVAILABLE_RULES.length} permissions enabled
+											</span>
+										</div>
+
+										<PermissionsCategoryList
+											currentRules={role.rules}
+											onChangeRules={(nextRules) => handleSaveRoleDefaultRules(role.id, nextRules)}
+										/>
+									</div>
+								))}
+							</div>
+
+							<div className="flex items-center justify-between pt-3 border-t border-border/60">
+								<button
+									type="button"
+									onClick={() => {
+										setTenantRoles(DEFAULT_TENANT_ROLES);
+										setSuccessMsg('Reset all tenant roles to default settings.');
+									}}
+									className="text-xs font-bold text-rose-600 hover:underline cursor-pointer"
+								>
+									Reset to Factory Defaults
+								</button>
+								<button
+									type="button"
+									onClick={() => setIsRolesModalOpen(false)}
+									className="px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-sm hover:bg-accent cursor-pointer"
+								>
+									Done
+								</button>
+							</div>
+						</div>
+					</div>
+				</div>,
+				document.body
+			)}
 		</div>
 	);
 }
@@ -509,6 +1290,73 @@ function FormField({ label, required, mono, type = 'text', value, onChange, plac
 					</button>
 				)}
 			</div>
+		</div>
+	);
+}
+
+function CustomSelect({ label, required, value, onChange, options, description }) {
+	const [isOpen, setIsOpen] = useState(false);
+	const dropdownRef = React.useRef(null);
+
+	useEffect(() => {
+		function handleClickOutside(event) {
+			if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+				setIsOpen(false);
+			}
+		}
+		document.addEventListener('mousedown', handleClickOutside);
+		return () => document.removeEventListener('mousedown', handleClickOutside);
+	}, []);
+
+	const selectedOption = options.find((o) => o.value === value) || options[0];
+
+	return (
+		<div className="relative w-full" ref={dropdownRef}>
+			{label && (
+				<label className="text-xs font-semibold text-primary block mb-1.5">
+					{label} {required && <span className="text-rose-500">*</span>}
+				</label>
+			)}
+			<button
+				type="button"
+				onClick={() => setIsOpen((prev) => !prev)}
+				className="w-full bg-background border border-input rounded-xl px-3.5 py-2 text-xs font-medium text-primary flex items-center justify-between cursor-pointer focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all h-[38px]"
+			>
+				<span>{selectedOption?.label || value}</span>
+				<span className={`material-symbols-outlined text-muted-foreground transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} style={{ fontSize: '18px' }}>
+					expand_more
+				</span>
+			</button>
+
+			{isOpen && (
+				<div className="absolute left-0 right-0 top-full mt-1.5 bg-background border border-border/80 rounded-xl shadow-xl z-[100] p-1.5 space-y-1 animate-in fade-in slide-in-from-top-1">
+					{options.map((opt) => {
+						const isSelected = opt.value === value;
+						return (
+							<button
+								key={opt.value}
+								type="button"
+								onClick={() => {
+									onChange(opt.value);
+									setIsOpen(false);
+								}}
+								className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
+									isSelected
+										? 'bg-primary text-primary-foreground font-bold shadow-xs'
+										: 'text-muted-foreground hover:text-primary hover:bg-slate-100'
+								}`}
+							>
+								<span>{opt.label}</span>
+								{isSelected && <CheckCircle2 size={14} className="text-primary-foreground" />}
+							</button>
+						);
+					})}
+				</div>
+			)}
+
+			{description && (
+				<p className="text-[11px] text-muted-foreground mt-1">{description}</p>
+			)}
 		</div>
 	);
 }

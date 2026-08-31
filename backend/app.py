@@ -1965,6 +1965,42 @@ def get_app_users():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+def _tenant_user_limit(cur):
+    """Maximum dashboard users allowed for the current tenant. This is the
+    tenant's max_users, set by the super admin (software owner). Resolved from
+    the logged-in tenant admin, falling back to the single tenant on the
+    deployment. Returns None if no tenant/limit is configured."""
+    payload = verify_token(
+        request.headers.get('Authorization') or request.headers.get('X-Auth-Token') or '')
+    email = (payload or {}).get('email')
+    if email:
+        cur.execute("SELECT max_users FROM tenants "
+                    "WHERE LOWER(admin_mail) = LOWER(%s) OR LOWER(tenant_mail) = LOWER(%s) LIMIT 1;",
+                    (email, email))
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            return int(row[0])
+    cur.execute("SELECT max_users FROM tenants ORDER BY id LIMIT 1;")
+    row = cur.fetchone()
+    return int(row[0]) if row and row[0] is not None else None
+
+
+@app.route('/api/user-limit', methods=['GET'])
+def get_user_limit():
+    """Dashboard-user quota for the current tenant: {limit, count}."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        limit = _tenant_user_limit(cur)
+        cur.execute('SELECT COUNT(*) FROM app_users;')
+        count = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        return jsonify({'limit': limit, 'count': count}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/app-users', methods=['POST'])
 @app.route('/api/users', methods=['POST'])
 def create_app_user():
@@ -1981,6 +2017,20 @@ def create_app_user():
 
         conn = get_db_connection()
         cur = conn.cursor()
+
+        # Enforce the tenant's dashboard-user cap (set by the super admin).
+        limit = _tenant_user_limit(cur)
+        if limit is not None:
+            cur.execute('SELECT COUNT(*) FROM app_users;')
+            if cur.fetchone()[0] >= limit:
+                cur.close()
+                conn.close()
+                return jsonify({
+                    'error': f'Dashboard user limit reached. Your plan allows up to {limit} '
+                             f'user{"s" if limit != 1 else ""}. Contact the software owner to increase it.',
+                    'code': 'USER_LIMIT_REACHED', 'limit': limit
+                }), 403
+
         cur.execute("""
             INSERT INTO app_users ("Email", "EmployeeCode", "Username", "PasswordHash", "DeviceId")
             VALUES (%s, %s, %s, %s, %s)
