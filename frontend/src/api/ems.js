@@ -154,6 +154,11 @@ export function fetchDeviceCommands(id) {
   return getJson(`/api/devices/${encodeURIComponent(id)}/commands`);
 }
 
+// Login / sleep / wake history for a device (last 30 days), newest first.
+export function fetchSessionEvents(id) {
+  return getJson(`/api/devices/${encodeURIComponent(id)}/session-events`);
+}
+
 export function fetchBlockedWebsites(id) {
   return getJson(`/api/devices/${encodeURIComponent(id)}/blocked-websites`);
 }

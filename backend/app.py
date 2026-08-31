@@ -221,6 +221,7 @@ def auth_login():
         if not password:
             return jsonify({'success': False, 'message': 'Enter your employee code and password.'}), 200
         try:
+            device_id = (data.get('deviceId') or '').strip()
             conn = get_db_connection()
             cur = conn.cursor()
             cur.execute(
@@ -230,15 +231,20 @@ def auth_login():
                 '   OR LOWER("Username") = LOWER(%s) LIMIT 1;',
                 (employee_code, employee_code, employee_code))
             row = cur.fetchone()
-            cur.close()
-            conn.close()
             if row and (row[3] or '') == password:
+                # Device sign-in -> session log (login at ...).
+                record_session_event(cur, device_id, 'login', row[1])
+                conn.commit()
+                cur.close()
+                conn.close()
                 return jsonify({
                     'success': True,
                     'message': 'Login successful',
                     'username': row[1],
                     'email': row[2],
                 }), 200
+            cur.close()
+            conn.close()
             return jsonify({'success': False, 'message': 'Invalid employee code or password.'}), 200
         except Exception as e:
             import traceback
@@ -809,6 +815,20 @@ def ip_geolocate(ip):
     return None, None, None
 
 
+def record_session_event(cur, device_id, event_type, detail=None):
+    """Append a device session event (login / sleep / wake) and prune anything
+    older than 30 days. Best-effort: never raise into the caller's request."""
+    if not device_id:
+        return
+    try:
+        cur.execute('INSERT INTO device_session_events (device_id, event_type, detail) VALUES (%s,%s,%s);',
+                    (device_id, event_type, detail))
+        cur.execute("DELETE FROM device_session_events "
+                    "WHERE occurred_at < CURRENT_TIMESTAMP - INTERVAL '30 days';")
+    except Exception as e:
+        print(f'record_session_event failed: {e}')
+
+
 def client_public_ip():
     """The caller's public IP: leftmost X-Forwarded-For, else remote_addr.
     Returns None for private/loopback addresses (e.g. local testing)."""
@@ -952,6 +972,11 @@ def device_heartbeat():
         conn = get_db_connection()
         cur = conn.cursor()
         public_ip = client_public_ip()
+        # If the device was suspended and is now sending a heartbeat, it woke up.
+        cur.execute('SELECT "SuspendedAt" FROM devices WHERE "DeviceId"=%s;', (device_id,))
+        _prev = cur.fetchone()
+        if _prev and _prev[0] is not None:
+            record_session_event(cur, device_id, 'wake')
         cur.execute(
             'UPDATE devices SET "LastSeen"=CURRENT_TIMESTAMP, "LastHeartbeatTime"=CURRENT_TIMESTAMP, '
             '"IPAddress"=COALESCE(%s,"IPAddress"), "Username"=COALESCE(%s,"Username"), '
@@ -1112,6 +1137,7 @@ def report_power_state():
         cur = conn.cursor()
         if suspended:
             cur.execute('UPDATE devices SET "SuspendedAt"=CURRENT_TIMESTAMP WHERE "DeviceId"=%s;', (device_id,))
+            record_session_event(cur, device_id, 'sleep')
         else:
             cur.execute('UPDATE devices SET "SuspendedAt"=NULL WHERE "DeviceId"=%s;', (device_id,))
         conn.commit()
@@ -1776,6 +1802,27 @@ def get_overview():
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/devices/<device_id>/session-events', methods=['GET'])
+def get_device_session_events(device_id):
+    """Login / sleep / wake history for a device (last 30 days), newest first."""
+    key = _resolve_device_key(device_id) or device_id
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT to_regclass('public.device_session_events');")
+        if cur.fetchone()[0] is None:
+            cur.close(); conn.close()
+            return jsonify([]), 200
+        cur.execute("SELECT event_type, occurred_at, detail FROM device_session_events "
+                    "WHERE device_id=%s AND occurred_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' "
+                    "ORDER BY occurred_at DESC LIMIT 200;", (key,))
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        return jsonify([{'type': r[0], 'at': to_iso(r[1]), 'detail': r[2]} for r in rows]), 200
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 

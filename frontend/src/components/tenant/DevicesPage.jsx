@@ -9,6 +9,7 @@ import {
 	fetchWorkTime,
 	fetchThreats,
 	fetchDeviceCommands,
+	fetchSessionEvents,
 	fetchBlockedWebsites,
 	addBlockedWebsite,
 	removeBlockedWebsite,
@@ -248,7 +249,7 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice }) {
 		setNewDomainInput('');
 
 		try {
-			const [metrics, apps, appUsage, network, workTime, threats, commands, blocked] = await Promise.all([
+			const [metrics, apps, appUsage, network, workTime, threats, commands, blocked, sessionEvents] = await Promise.all([
 				fetchDeviceMetrics(dev.id).catch(() => null),
 				fetchInstalledApps(dev.id).catch(() => []),
 				fetchAppUsage(dev.id).catch(() => []),
@@ -257,6 +258,7 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice }) {
 				fetchThreats(dev.id).catch(() => []),
 				fetchDeviceCommands(dev.id).catch(() => []),
 				fetchBlockedWebsites(dev.id).catch(() => []),
+				fetchSessionEvents(dev.id).catch(() => []),
 			]);
 
 			setBlockedDomains(blocked.map((b) => ({ id: b.id, domain: b.domain })));
@@ -292,6 +294,7 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice }) {
 				appUsage,
 				threats,
 				commands,
+				sessionEvents,
 			};
 			setInspectDevice((cur) => (cur && cur.id === dev.id ? enriched : cur));
 		} catch (err) {
@@ -1098,6 +1101,29 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice }) {
 									</div>
 								</div>
 							</div>
+
+							{/* Login logs (last 30 days) */}
+							<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-3">
+								<SectionTitle text="Login Logs (last 30 days)" />
+								{(inspectDevice.sessionEvents ?? []).length === 0 ? (
+									<p className="text-[12px] text-on-surface-variant">No login activity recorded yet.</p>
+								) : (
+									<div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+										{(inspectDevice.sessionEvents ?? []).map((e, i) => {
+											const meta = sessionEventMeta(e.type);
+											return (
+												<div key={i} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-outline-variant/30 text-[12px]">
+													<span className="flex items-center gap-2 font-medium text-on-surface">
+														<span className={`material-symbols-outlined text-[18px] ${meta.color}`}>{meta.icon}</span>
+														{meta.label}
+													</span>
+													<span className="font-mono text-on-surface-variant">{formatDateTime(e.at)}</span>
+												</div>
+											);
+										})}
+									</div>
+								)}
+							</div>
 						</div>
 					</div>
 				</div>,
@@ -1321,6 +1347,21 @@ function fmtSecs(s) {
 	const m = Math.floor(s / 60);
 	const sec = s % 60;
 	return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}
+
+// Label + icon for a session event type (login / sleep / wake).
+function sessionEventMeta(type) {
+	switch ((type || '').toLowerCase()) {
+		case 'login': return { label: 'Login', icon: 'login', color: 'text-emerald-600' };
+		case 'sleep': return { label: 'Sleep', icon: 'bedtime', color: 'text-amber-500' };
+		case 'wake': return { label: 'Wake', icon: 'wb_sunny', color: 'text-primary' };
+		default: return { label: type || 'Event', icon: 'schedule', color: 'text-on-surface-variant' };
+	}
+}
+
+function formatDateTime(iso) {
+	if (!iso) return '—';
+	try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }
 
 // Average duration (seconds) of completed commands of a given type, from their
