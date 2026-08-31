@@ -345,6 +345,21 @@ export function fetchUserLimit() {
   return getJson('/api/user-limit');
 }
 
+// Tenant inactivity auto-lock settings: { inactivityLockMinutes, inactivityAlertMinutes }.
+export function fetchTenantSettings() {
+  return getJson('/api/tenant/settings');
+}
+
+export async function saveTenantSettings(input) {
+  const res = await fetch(`${API_BASE}/api/tenant/settings`, {
+    method: 'PUT',
+    headers: jsonHeaders,
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throwForStatus(res.status);
+  return res.json();
+}
+
 export async function updateUser(id, input) {
   const res = await fetch(`${API_BASE}/api/users/${id}`, {
     method: 'PUT',

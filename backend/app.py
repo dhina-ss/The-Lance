@@ -829,6 +829,59 @@ def record_session_event(cur, device_id, event_type, detail=None):
         print(f'record_session_event failed: {e}')
 
 
+def send_email(to_addr, subject, body_html):
+    """Best-effort transactional email via SMTP. Reads connection details from
+    environment (SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / SMTP_FROM /
+    SMTP_USE_TLS). Returns (ok, message); never raises into the caller."""
+    import os, smtplib, ssl
+    from email.message import EmailMessage
+    host = os.environ.get('SMTP_HOST', '').strip()
+    user = os.environ.get('SMTP_USER', '').strip()
+    password = os.environ.get('SMTP_PASS', '')
+    if not host or not to_addr:
+        return False, 'SMTP not configured' if not host else 'No recipient'
+    sender = os.environ.get('SMTP_FROM', '').strip() or user
+    port = int(os.environ.get('SMTP_PORT', '587') or 587)
+    use_tls = (os.environ.get('SMTP_USE_TLS', 'true').strip().lower() != 'false')
+    try:
+        msg = EmailMessage()
+        msg['Subject'] = subject
+        msg['From'] = sender
+        msg['To'] = to_addr
+        msg.set_content('This message requires an HTML-capable email client.')
+        msg.add_alternative(body_html, subtype='html')
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=20) as s:
+                if user:
+                    s.login(user, password)
+                s.send_message(msg)
+        else:
+            with smtplib.SMTP(host, port, timeout=20) as s:
+                if use_tls:
+                    s.starttls(context=ssl.create_default_context())
+                if user:
+                    s.login(user, password)
+                s.send_message(msg)
+        return True, 'sent'
+    except Exception as e:
+        print(f'send_email failed: {e}')
+        return False, str(e)
+
+
+def _tenant_inactivity(cur):
+    """(lock_minutes, alert_minutes) for the deployment's tenant, defaulting to
+    5 / 10 when unset. Single-tenant deployment, so the first tenant wins."""
+    try:
+        cur.execute('SELECT COALESCE(inactivity_lock_minutes, 5), '
+                    'COALESCE(inactivity_alert_minutes, 10) FROM tenants ORDER BY id LIMIT 1;')
+        row = cur.fetchone()
+        if row:
+            return int(row[0] or 5), int(row[1] or 10)
+    except Exception as e:
+        print(f'_tenant_inactivity failed: {e}')
+    return 5, 10
+
+
 def client_public_ip():
     """The caller's public IP: leftmost X-Forwarded-For, else remote_addr.
     Returns None for private/loopback addresses (e.g. local testing)."""
@@ -1039,6 +1092,7 @@ def device_heartbeat():
         row = cur.fetchone()
         cur.execute('SELECT domain FROM blocked_websites WHERE device_id=%s;', (device_id,))
         blocked = sorted({d for d in (normalize_domain(r[0]) for r in cur.fetchall()) if d})
+        lock_min, alert_min = _tenant_inactivity(cur)
         conn.commit()
         cur.close()
         conn.close()
@@ -1049,6 +1103,8 @@ def device_heartbeat():
             'usbBlockingEnabled': bool(row[0]) if row else False,
             'storeGatingEnabled': bool(row[1]) if row else False,
             'requireLoginEachStartup': bool(row[2]) if row else False,
+            'inactivityLockSeconds': lock_min * 60,
+            'inactivityAlertSeconds': alert_min * 60,
             'blockedWebsites': blocked
         }), 200
     except Exception as e:
@@ -1145,6 +1201,79 @@ def report_power_state():
         conn.close()
         return jsonify({'success': True}), 200
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/devices/idle-lock', methods=['POST'])
+def report_idle_lock():
+    """Agent beacon: the workstation was auto-locked after inactivity. Records a
+    'lock' session event for the device's login-log timeline."""
+    device_id = (request.headers.get('X-Device-Id') or '').strip()
+    if not device_id:
+        return jsonify({'error': 'device id required'}), 400
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        record_session_event(cur, device_id, 'lock')
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/devices/idle-alert', methods=['POST'])
+def report_idle_alert():
+    """Agent beacon: the device stayed locked past the alert window without the
+    user returning. Emails the device user's assigned manager and records an
+    'alert' session event."""
+    device_id = (request.headers.get('X-Device-Id') or '').strip()
+    if not device_id:
+        return jsonify({'error': 'device id required'}), 400
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # device -> activating (device) user -> that user's manager (dashboard user)
+        cur.execute("""
+            SELECT d."DeviceName", du."Username", du."EmployeeCode",
+                   mu."Username", mu."Email"
+            FROM devices d
+            LEFT JOIN app_users du ON du."Id"::text = d."ActivatedByUserId"
+            LEFT JOIN app_users mu ON mu."Id" = du."manager_user_id"
+            WHERE d."DeviceId" = %s;
+        """, (device_id,))
+        row = cur.fetchone()
+        device_name = (row[0] if row else None) or device_id
+        emp_name = (row[1] if row else None) or 'the assigned employee'
+        emp_code = (row[2] if row else None) or ''
+        mgr_name = (row[3] if row else None)
+        mgr_email = (row[4] if row else None)
+        _lock_min, alert_min = _tenant_inactivity(cur)
+        record_session_event(cur, device_id, 'alert', mgr_email or None)
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        if not mgr_email:
+            return jsonify({'success': True, 'emailed': False,
+                            'reason': 'no manager assigned'}), 200
+
+        who = f"{emp_name}" + (f" ({emp_code})" if emp_code else "")
+        subject = f"Inactivity alert: {device_name} idle for {alert_min}+ minutes"
+        body = f"""<div style="font-family:Segoe UI,Arial,sans-serif;color:#0f172a">
+  <p>Hi {mgr_name or 'there'},</p>
+  <p><strong>{device_name}</strong>, used by <strong>{who}</strong>, was locked
+  after inactivity and has not been woken for more than <strong>{alert_min} minutes</strong>.</p>
+  <p>You are listed as this user's manager, so we're letting you know.</p>
+  <p style="color:#64748b;font-size:12px">Sent automatically by The Lance Endpoint.</p>
+</div>"""
+        ok, msg = send_email(mgr_email, subject, body)
+        return jsonify({'success': True, 'emailed': ok,
+                        'manager': mgr_email, 'detail': msg}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
@@ -2016,9 +2145,11 @@ def get_app_users():
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
-            SELECT u.*, d."DeviceName", d."Model", d."IPAddress"
+            SELECT u.*, d."DeviceName", d."Model", d."IPAddress",
+                   m."Username" AS "ManagerName"
             FROM app_users u
             LEFT JOIN devices d ON u."DeviceId" = d."DeviceId"
+            LEFT JOIN app_users m ON m."Id" = u."manager_user_id"
             ORDER BY u."Id" ASC;
         """)
         rows = cur.fetchall()
@@ -2036,7 +2167,10 @@ def get_app_users():
                 'deviceId': r['DeviceId'],
                 'deviceName': r['DeviceName'],
                 'deviceModel': r['Model'],
-                'deviceIp': r['IPAddress']
+                'deviceIp': r['IPAddress'],
+                'userType': r.get('user_type') or 'Device User',
+                'managerUserId': r.get('manager_user_id'),
+                'managerName': r.get('ManagerName')
             })
         return jsonify(users), 200
     except Exception as e:
@@ -2080,6 +2214,67 @@ def get_user_limit():
         return jsonify({'error': str(e)}), 500
 
 
+def _current_tenant_id(cur):
+    """Resolve the acting tenant's id from the logged-in admin, falling back to
+    the single tenant on the deployment."""
+    payload = verify_token(
+        request.headers.get('Authorization') or request.headers.get('X-Auth-Token') or '')
+    email = (payload or {}).get('email')
+    if email:
+        cur.execute("SELECT id FROM tenants "
+                    "WHERE LOWER(admin_mail) = LOWER(%s) OR LOWER(tenant_mail) = LOWER(%s) LIMIT 1;",
+                    (email, email))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+    cur.execute("SELECT id FROM tenants ORDER BY id LIMIT 1;")
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+@app.route('/api/tenant/settings', methods=['GET'])
+def get_tenant_settings():
+    """Tenant-admin settings: the inactivity auto-lock and manager-alert times."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        lock_min, alert_min = _tenant_inactivity(cur)
+        cur.close()
+        conn.close()
+        return jsonify({'inactivityLockMinutes': lock_min,
+                        'inactivityAlertMinutes': alert_min}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/settings', methods=['PUT'])
+def update_tenant_settings():
+    """Tenant admin sets the inactivity auto-lock time and the manager-alert
+    delay (minutes)."""
+    try:
+        data = request.json or {}
+        conn = get_db_connection()
+        cur = conn.cursor()
+        tid = _current_tenant_id(cur)
+        if tid is None:
+            cur.close(); conn.close()
+            return jsonify({'error': 'No tenant configured'}), 400
+        lock_min = max(1, min(240, int(data.get('inactivityLockMinutes', 5) or 5)))
+        alert_min = max(1, min(1440, int(data.get('inactivityAlertMinutes', 10) or 10)))
+        cur.execute('UPDATE tenants SET inactivity_lock_minutes=%s, '
+                    'inactivity_alert_minutes=%s, updated_at=CURRENT_TIMESTAMP WHERE id=%s;',
+                    (lock_min, alert_min, tid))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({'success': True, 'inactivityLockMinutes': lock_min,
+                        'inactivityAlertMinutes': alert_min}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/app-users', methods=['POST'])
 @app.route('/api/users', methods=['POST'])
 def create_app_user():
@@ -2090,6 +2285,8 @@ def create_app_user():
         username = data.get('username', '').strip()
         password = data.get('password', '').strip()
         device_id = data.get('deviceId', '').strip()
+        user_type = (data.get('userType') or data.get('type') or 'Device User').strip() or 'Device User'
+        manager_user_id = data.get('managerUserId') or None
 
         if not email or not username:
             return jsonify({'error': 'Email and username are required'}), 400
@@ -2111,10 +2308,10 @@ def create_app_user():
                 }), 403
 
         cur.execute("""
-            INSERT INTO app_users ("Email", "EmployeeCode", "Username", "PasswordHash", "DeviceId")
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO app_users ("Email", "EmployeeCode", "Username", "PasswordHash", "DeviceId", "user_type", "manager_user_id")
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING "Id", "CreatedDate";
-        """, (email, emp_code, username, password, device_id or None))
+        """, (email, emp_code, username, password, device_id or None, user_type, manager_user_id))
         new_row = cur.fetchone()
         conn.commit()
         cur.close()
@@ -2126,7 +2323,9 @@ def create_app_user():
             'employeeCode': emp_code,
             'username': username,
             'createdDate': new_row[1].isoformat() if new_row[1] else None,
-            'deviceId': device_id
+            'deviceId': device_id,
+            'userType': user_type,
+            'managerUserId': manager_user_id
         }), 201
     except Exception as e:
         import traceback
@@ -2142,26 +2341,32 @@ def update_app_user(user_id):
         emp_code = data.get('employeeCode', '').strip()
         username = data.get('username', '').strip()
         password = data.get('password', '').strip()
+        user_type = (data.get('userType') or data.get('type') or 'Device User').strip() or 'Device User'
+        manager_user_id = data.get('managerUserId') or None
 
         conn = get_db_connection()
         cur = conn.cursor()
         if password:
             cur.execute("""
                 UPDATE app_users
-                SET "Email" = %s, "EmployeeCode" = %s, "Username" = %s, "PasswordHash" = %s
+                SET "Email" = %s, "EmployeeCode" = %s, "Username" = %s, "PasswordHash" = %s,
+                    "user_type" = %s, "manager_user_id" = %s
                 WHERE "Id" = %s;
-            """, (email, emp_code, username, password, user_id))
+            """, (email, emp_code, username, password, user_type, manager_user_id, user_id))
         else:
             cur.execute("""
                 UPDATE app_users
-                SET "Email" = %s, "EmployeeCode" = %s, "Username" = %s
+                SET "Email" = %s, "EmployeeCode" = %s, "Username" = %s,
+                    "user_type" = %s, "manager_user_id" = %s
                 WHERE "Id" = %s;
-            """, (email, emp_code, username, user_id))
+            """, (email, emp_code, username, user_type, manager_user_id, user_id))
         conn.commit()
         cur.close()
         conn.close()
 
-        return jsonify({'id': user_id, 'email': email, 'employeeCode': emp_code, 'username': username}), 200
+        return jsonify({'id': user_id, 'email': email, 'employeeCode': emp_code,
+                        'username': username, 'userType': user_type,
+                        'managerUserId': manager_user_id}), 200
     except Exception as e:
         import traceback
         traceback.print_exc()

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { Users, UserPlus, TrendingUp, BadgeCheck, Search, X, Mail, Lock, ShieldCheck, User, Pencil, Trash2, CheckCircle2, AlertTriangle, Eye, EyeOff } from 'lucide-react';
-import { fetchUsers, createUser, updateUser, deleteUser, fetchUserLimit, relativeTime } from '../../api/ems';
+import { Users, UserPlus, TrendingUp, BadgeCheck, Search, X, Mail, Lock, ShieldCheck, User, Pencil, Trash2, CheckCircle2, AlertTriangle, Eye, EyeOff, Clock, Save, Bell } from 'lucide-react';
+import { fetchUsers, createUser, updateUser, deleteUser, fetchUserLimit, fetchTenantSettings, saveTenantSettings, relativeTime } from '../../api/ems';
 
 const AVATAR_BG = ['bg-primary', 'bg-accent', 'bg-emerald-600', 'bg-amber-600'];
 
@@ -275,6 +275,8 @@ function mapUser(u) {
 		registered: u.createdDate || u.registered,
 		deviceId: u.deviceId,
 		deviceName: u.deviceName,
+		managerUserId: u.managerUserId ?? null,
+		managerName: u.managerName || null,
 		avatarBg: AVATAR_BG[idx],
 	};
 }
@@ -282,6 +284,10 @@ function mapUser(u) {
 export default function UsersPage({ onNavigateToDevice }) {
 	const [users, setUsers] = useState([]);
 	const [userLimit, setUserLimit] = useState(null);
+	const [settings, setSettings] = useState({ inactivityLockMinutes: 5, inactivityAlertMinutes: 10 });
+	const [settingsSaving, setSettingsSaving] = useState(false);
+	const [newManagerId, setNewManagerId] = useState('');
+	const [editManagerId, setEditManagerId] = useState('');
 	const [loading, setLoading] = useState(true);
 	const [loadError, setLoadError] = useState(null);
 	const [searchTerm, setSearchTerm] = useState('');
@@ -355,6 +361,10 @@ export default function UsersPage({ onNavigateToDevice }) {
 			const q = await fetchUserLimit();
 			setUserLimit(typeof q?.limit === 'number' ? q.limit : null);
 		} catch { /* quota is best-effort */ }
+		try {
+			const s = await fetchTenantSettings();
+			setSettings({ inactivityLockMinutes: s.inactivityLockMinutes ?? 5, inactivityAlertMinutes: s.inactivityAlertMinutes ?? 10 });
+		} catch { /* settings are best-effort */ }
 	};
 
 	useEffect(() => {
@@ -383,6 +393,7 @@ export default function UsersPage({ onNavigateToDevice }) {
 		setNewPassword('');
 		setNewConfirmPassword('');
 		setNewType('Device User');
+		setNewManagerId('');
 		setNewRole(tenantRoles[0]?.name || 'Super Admin');
 		setNewRules(tenantRoles[0]?.rules || []);
 		setFormError('');
@@ -462,6 +473,7 @@ export default function UsersPage({ onNavigateToDevice }) {
 				confirmPassword: newConfirmPassword,
 				type: newType,
 				role: newType === 'Dashboard User' ? newRole : 'Device User',
+				managerUserId: newType === 'Device User' && newManagerId ? Number(newManagerId) : null,
 				rules: newType === 'Dashboard User' ? assignedRules : [],
 			});
 			setUsers((us) => [mapUser(created), ...us]);
@@ -481,6 +493,7 @@ export default function UsersPage({ onNavigateToDevice }) {
 		setEditUsername(user.name);
 		setEditEmail(user.email);
 		setEditType(user.type || 'Dashboard User');
+		setEditManagerId(user.managerUserId ? String(user.managerUserId) : '');
 		setEditRole(user.role || 'Tenant Admin');
 		setEditRules(user.rules || ['device_mgmt', 'software_deploy', 'usb_url_rules', 'user_mgmt', 'audit_geo', 'reports_export']);
 		setEditPassword('');
@@ -505,6 +518,7 @@ export default function UsersPage({ onNavigateToDevice }) {
 				password: editPassword,
 				type: editType,
 				role: editType === 'Dashboard User' ? editRole : 'Device User',
+				managerUserId: editType === 'Device User' && editManagerId ? Number(editManagerId) : null,
 				rules: editType === 'Dashboard User' ? editRules : [],
 			});
 			setUsers((us) =>
@@ -540,6 +554,26 @@ export default function UsersPage({ onNavigateToDevice }) {
 			setDeleteSubmitting(false);
 		}
 	};
+
+	const handleSaveSettings = async () => {
+		setSettingsSaving(true);
+		try {
+			const saved = await saveTenantSettings({
+				inactivityLockMinutes: Number(settings.inactivityLockMinutes) || 5,
+				inactivityAlertMinutes: Number(settings.inactivityAlertMinutes) || 10,
+			});
+			setSettings({ inactivityLockMinutes: saved.inactivityLockMinutes, inactivityAlertMinutes: saved.inactivityAlertMinutes });
+			setSuccessMsg('Inactivity auto-lock settings saved successfully!');
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Failed to save settings.');
+		} finally {
+			setSettingsSaving(false);
+		}
+	};
+
+	const managerOptions = [{ value: '', label: 'Unassigned' }].concat(
+		users.filter((u) => u.type === 'Dashboard User').map((u) => ({ value: String(u.id), label: u.name }))
+	);
 
 	const filteredUsers = users.filter((u) => {
 		const term = searchTerm.toLowerCase();
@@ -581,6 +615,29 @@ export default function UsersPage({ onNavigateToDevice }) {
 				<UserSummary title="New Today" value={newToday} icon={UserPlus} tone="bg-accent/10 text-accent" badge="Last 24h" />
 				<UserSummary title="New This Week" value={newWeek} icon={TrendingUp} tone="bg-emerald-500/10 text-emerald-600" badge="Last 7 days" />
 				<UserSummary title="Enrolled" value={totalCount} icon={BadgeCheck} tone="bg-primary/10 text-primary" badge="EMS accounts" />
+			</section>
+
+			{/* Inactivity Auto-Lock Settings */}
+			<section className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl p-6 shadow-sm">
+				<div className="flex items-start gap-3 mb-4">
+					<div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0"><Clock size={20} /></div>
+					<div>
+						<h2 className="text-lg font-extrabold text-primary tracking-tight">Inactivity Auto-Lock</h2>
+						<p className="text-xs text-muted-foreground mt-0.5">Lock idle devices automatically and email the assigned manager if the user does not return. Applies to every device in your tenant.</p>
+					</div>
+				</div>
+				<div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+					<div>
+						<label className="text-xs font-semibold text-primary mb-1.5 flex items-center gap-1.5"><Lock size={13} /> Lock screen after (minutes)</label>
+						<input type="number" min={1} max={240} value={settings.inactivityLockMinutes} onChange={(e) => setSettings((s) => ({ ...s, inactivityLockMinutes: e.target.value }))} className="w-full bg-background border border-input rounded-xl px-3.5 py-2 text-xs font-medium text-primary focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all" />
+					</div>
+					<div>
+						<label className="text-xs font-semibold text-primary mb-1.5 flex items-center gap-1.5"><Bell size={13} /> Alert manager after locked (minutes)</label>
+						<input type="number" min={1} max={1440} value={settings.inactivityAlertMinutes} onChange={(e) => setSettings((s) => ({ ...s, inactivityAlertMinutes: e.target.value }))} className="w-full bg-background border border-input rounded-xl px-3.5 py-2 text-xs font-medium text-primary focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all" />
+					</div>
+					<button type="button" onClick={handleSaveSettings} disabled={settingsSaving} className="px-4 py-2.5 bg-primary text-primary-foreground hover:bg-accent hover:text-accent-foreground rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer disabled:opacity-60 h-[38px]"><Save size={16} /> {settingsSaving ? 'Saving…' : 'Save Settings'}</button>
+				</div>
+				<p className="text-[11px] text-muted-foreground mt-3">Managers are assigned per device user below (edit a user to set their manager).</p>
 			</section>
 
 			{/* Table Card */}
@@ -642,7 +699,7 @@ export default function UsersPage({ onNavigateToDevice }) {
 										</td>
 										<td className="px-6 py-4">
 											<div className="flex items-center gap-3">
-												<span className="font-bold text-primary">{u.name}</span>
+												<div><span className="font-bold text-primary block">{u.name}</span>{u.type === 'Device User' && u.managerName && (<span className="block text-[10px] text-muted-foreground font-medium mt-0.5">Manager: {u.managerName}</span>)}</div>
 											</div>
 										</td>
 										<td className="px-6 py-4">
@@ -803,6 +860,9 @@ export default function UsersPage({ onNavigateToDevice }) {
 										? 'Dashboard users have portal access with assigned roles & permission rules.'
 										: 'Device users are assigned directly to endpoints without administrative portal access.'}
 								</p>
+								{newType === 'Device User' && (
+									<CustomSelect label="Assign Manager (optional)" value={newManagerId} onChange={setNewManagerId} options={managerOptions} description="The dashboard user emailed if this user's device stays idle." />
+								)}
 								<FormField label="Username" required value={newUsername} onChange={setNewUsername} placeholder="e.g. john.doe" />
 								<FormField label="Email Address" required type="email" value={newEmail} onChange={setNewEmail} placeholder="e.g. john.doe@enterprise.com" />
 								<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1067,6 +1127,9 @@ export default function UsersPage({ onNavigateToDevice }) {
 								</>
 							)}
 
+							{editType === 'Device User' && (
+								<CustomSelect label="Assign Manager (optional)" value={editManagerId} onChange={setEditManagerId} options={managerOptions} description="The dashboard user emailed if this user's device stays idle." />
+							)}
 							<FormField label="Email Address" required type="email" value={editEmail} onChange={setEditEmail} placeholder="e.g. john.doe@enterprise.com" />
 							<FormField label="New Password" type="password" minLength={8} value={editPassword} onChange={(v) => { setEditPassword(v); if (editError) setEditError(''); }} placeholder="Leave blank or enter at least 8 characters" />
 							{editError && <p className="text-xs text-rose-500 font-semibold">{editError}</p>}
