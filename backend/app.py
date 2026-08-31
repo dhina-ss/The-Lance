@@ -829,39 +829,21 @@ def record_session_event(cur, device_id, event_type, detail=None):
         print(f'record_session_event failed: {e}')
 
 
-def _smtp_config_from_db(cur):
-    """The tenant's saved SMTP settings (single-tenant deployment). Returns a
-    dict when a host is configured, else None."""
-    try:
-        cur.execute('SELECT smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, '
-                    'COALESCE(smtp_use_tls, TRUE) FROM tenants ORDER BY id LIMIT 1;')
-        row = cur.fetchone()
-        if row and (row[0] or '').strip():
-            return {'host': (row[0] or '').strip(), 'port': int(row[1] or 587),
-                    'user': (row[2] or '').strip(), 'pass': row[3] or '',
-                    'from': (row[4] or '').strip(), 'use_tls': bool(row[5])}
-    except Exception as e:
-        print(f'_smtp_config_from_db failed: {e}')
-    return None
-
-
-def send_email(to_addr, subject, body_html, cfg=None):
-    """Best-effort transactional email via SMTP. Uses the supplied config (the
-    tenant's saved settings) when given, otherwise falls back to environment
-    (SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / SMTP_FROM / SMTP_USE_TLS).
-    Returns (ok, message); never raises into the caller."""
+def send_email(to_addr, subject, body_html):
+    """Best-effort transactional email via SMTP. Reads connection details from
+    the environment (SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / SMTP_FROM /
+    SMTP_USE_TLS), configured server-side by the software provider. Returns
+    (ok, message); never raises into the caller."""
     import os, smtplib, ssl
     from email.message import EmailMessage
-    cfg = cfg or {}
-    host = (cfg.get('host') or os.environ.get('SMTP_HOST', '')).strip()
-    user = (cfg.get('user') or os.environ.get('SMTP_USER', '')).strip()
-    password = cfg.get('pass') if cfg.get('host') else os.environ.get('SMTP_PASS', '')
+    host = os.environ.get('SMTP_HOST', '').strip()
+    user = os.environ.get('SMTP_USER', '').strip()
+    password = os.environ.get('SMTP_PASS', '')
     if not host or not to_addr:
         return False, 'SMTP not configured' if not host else 'No recipient'
-    sender = (cfg.get('from') or os.environ.get('SMTP_FROM', '')).strip() or user
-    port = int(cfg.get('port') or os.environ.get('SMTP_PORT', '587') or 587)
-    use_tls = bool(cfg.get('use_tls')) if cfg.get('host') else \
-        (os.environ.get('SMTP_USE_TLS', 'true').strip().lower() != 'false')
+    sender = os.environ.get('SMTP_FROM', '').strip() or user
+    port = int(os.environ.get('SMTP_PORT', '587') or 587)
+    use_tls = (os.environ.get('SMTP_USE_TLS', 'true').strip().lower() != 'false')
     try:
         msg = EmailMessage()
         msg['Subject'] = subject
@@ -1269,7 +1251,6 @@ def report_idle_alert():
         mgr_name = (row[3] if row else None)
         mgr_email = (row[4] if row else None)
         _lock_min, alert_min = _tenant_inactivity(cur)
-        smtp_cfg = _smtp_config_from_db(cur)
         record_session_event(cur, device_id, 'alert', mgr_email or None)
         conn.commit()
         cur.close()
@@ -1288,7 +1269,7 @@ def report_idle_alert():
   <p>You are listed as this user's manager, so we're letting you know.</p>
   <p style="color:#64748b;font-size:12px">Sent automatically by The Lance Endpoint.</p>
 </div>"""
-        ok, msg = send_email(mgr_email, subject, body, smtp_cfg)
+        ok, msg = send_email(mgr_email, subject, body)
         return jsonify({'success': True, 'emailed': ok,
                         'manager': mgr_email, 'detail': msg}), 200
     except Exception as e:
@@ -2254,37 +2235,24 @@ def _current_tenant_id(cur):
 
 @app.route('/api/tenant/settings', methods=['GET'])
 def get_tenant_settings():
-    """Tenant-admin settings: inactivity auto-lock/alert times + SMTP mail
-    config. The SMTP password is never returned; smtpConfigured reflects whether
-    a host and password are saved."""
+    """Tenant-admin settings: the inactivity auto-lock and manager-alert times.
+    Mail delivery is configured server-side (SMTP_* env), not here."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         lock_min, alert_min = _tenant_inactivity(cur)
-        cur.execute('SELECT smtp_host, smtp_port, smtp_user, smtp_from, '
-                    'COALESCE(smtp_use_tls, TRUE), smtp_pass FROM tenants ORDER BY id LIMIT 1;')
-        s = cur.fetchone() or (None, None, None, None, True, None)
         cur.close()
         conn.close()
-        return jsonify({
-            'inactivityLockMinutes': lock_min,
-            'inactivityAlertMinutes': alert_min,
-            'smtpHost': s[0] or '',
-            'smtpPort': int(s[1]) if s[1] else 587,
-            'smtpUser': s[2] or '',
-            'smtpFrom': s[3] or '',
-            'smtpUseTls': bool(s[4]),
-            'smtpConfigured': bool((s[0] or '').strip() and (s[5] or '').strip()),
-        }), 200
+        return jsonify({'inactivityLockMinutes': lock_min,
+                        'inactivityAlertMinutes': alert_min}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/tenant/settings', methods=['PUT'])
 def update_tenant_settings():
-    """Tenant admin saves the inactivity times and SMTP mail config. The SMTP
-    password is only overwritten when a non-empty value is supplied (so leaving
-    it blank keeps the stored one)."""
+    """Tenant admin sets the inactivity auto-lock time and the manager-alert
+    delay (minutes)."""
     try:
         data = request.json or {}
         conn = get_db_connection()
@@ -2295,55 +2263,14 @@ def update_tenant_settings():
             return jsonify({'error': 'No tenant configured'}), 400
         lock_min = max(1, min(240, int(data.get('inactivityLockMinutes', 5) or 5)))
         alert_min = max(1, min(1440, int(data.get('inactivityAlertMinutes', 10) or 10)))
-        smtp_host = (data.get('smtpHost') or '').strip()
-        smtp_port = int(data.get('smtpPort') or 587)
-        smtp_user = (data.get('smtpUser') or '').strip()
-        smtp_from = (data.get('smtpFrom') or '').strip()
-        smtp_use_tls = bool(data.get('smtpUseTls', True))
-        smtp_pass = data.get('smtpPass')  # None/'' means keep existing
-
-        cur.execute('UPDATE tenants SET inactivity_lock_minutes=%s, inactivity_alert_minutes=%s, '
-                    'smtp_host=%s, smtp_port=%s, smtp_user=%s, smtp_from=%s, smtp_use_tls=%s, '
-                    'updated_at=CURRENT_TIMESTAMP WHERE id=%s;',
-                    (lock_min, alert_min, smtp_host, smtp_port, smtp_user, smtp_from, smtp_use_tls, tid))
-        if smtp_pass:
-            cur.execute('UPDATE tenants SET smtp_pass=%s WHERE id=%s;', (smtp_pass, tid))
+        cur.execute('UPDATE tenants SET inactivity_lock_minutes=%s, '
+                    'inactivity_alert_minutes=%s, updated_at=CURRENT_TIMESTAMP WHERE id=%s;',
+                    (lock_min, alert_min, tid))
         conn.commit()
         cur.close()
         conn.close()
         return jsonify({'success': True, 'inactivityLockMinutes': lock_min,
                         'inactivityAlertMinutes': alert_min}), 200
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/tenant/settings/test-email', methods=['POST'])
-def test_tenant_email():
-    """Send a test message to verify the saved SMTP settings. Emails the address
-    supplied in the body, else the tenant's admin mail."""
-    try:
-        data = request.json or {}
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cfg = _smtp_config_from_db(cur)
-        cur.execute('SELECT admin_mail, tenant_name FROM tenants ORDER BY id LIMIT 1;')
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        to_addr = (data.get('to') or (row[0] if row else '') or '').strip()
-        if not cfg:
-            return jsonify({'success': False, 'emailed': False, 'detail': 'Save SMTP settings first.'}), 200
-        if not to_addr:
-            return jsonify({'success': False, 'emailed': False, 'detail': 'No recipient address.'}), 200
-        tname = (row[1] if row else '') or 'your workspace'
-        body = f"""<div style="font-family:Segoe UI,Arial,sans-serif;color:#0f172a">
-  <p>This is a test email from <strong>{tname}</strong> on The Lance Endpoint.</p>
-  <p>If you received this, your inactivity manager-alert emails are configured correctly.</p>
-</div>"""
-        ok, msg = send_email(to_addr, 'The Lance — SMTP test email', body, cfg)
-        return jsonify({'success': True, 'emailed': ok, 'to': to_addr, 'detail': msg}), 200
     except Exception as e:
         import traceback
         traceback.print_exc()

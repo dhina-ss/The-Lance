@@ -360,16 +360,6 @@ export async function saveTenantSettings(input) {
   return res.json();
 }
 
-export async function testTenantEmail(to) {
-  const res = await fetch(`${API_BASE}/api/tenant/settings/test-email`, {
-    method: 'POST',
-    headers: jsonHeaders,
-    body: JSON.stringify({ to: to || '' }),
-  });
-  if (!res.ok) throwForStatus(res.status);
-  return res.json();
-}
-
 export async function updateUser(id, input) {
   const res = await fetch(`${API_BASE}/api/users/${id}`, {
     method: 'PUT',
