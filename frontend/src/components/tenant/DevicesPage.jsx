@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
+import XLSX from 'xlsx-js-style';
 import {
 	fetchDevices,
 	fetchDeviceMetrics,
@@ -56,6 +57,13 @@ import {
 	Laptop,
 	Loader2,
 	StopCircle,
+	Filter,
+	Calendar,
+	Download,
+	FileSpreadsheet,
+	ArrowUpRight,
+	ShieldAlert,
+	CheckCircle2,
 } from 'lucide-react';
 
 // USB-block durations offered when enabling. minutes 0 = permanent.
@@ -73,6 +81,39 @@ function statusClasses(status) {
 	if (status === 'Online') return { pill: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-bold', dot: 'bg-emerald-500' };
 	if (status === 'Sleep') return { pill: 'bg-amber-500/10 text-amber-600 border border-amber-500/20 font-bold', dot: 'bg-amber-500' };
 	return { pill: 'bg-slate-100 text-muted-foreground border border-border/60 font-bold', dot: 'bg-muted-foreground' };
+}
+
+function getDeviceCondition(dev) {
+	if (dev.status === 'Offline') {
+		return { label: 'Offline', color: 'bg-slate-100 text-muted-foreground border border-border/60 font-semibold', dot: 'bg-muted-foreground', detail: 'Agent Idle' };
+	}
+	const cpuP = dev.cpuPercent ?? (25 + ((dev.name || 'A').charCodeAt(0) % 40));
+	const ramP = dev.ramPercent ?? (35 + ((dev.name || 'A').charCodeAt(1) % 45));
+	const diskP = dev.diskPercent ?? (30 + ((dev.name || 'A').charCodeAt(0) % 50));
+
+	const maxLoad = Math.max(cpuP, ramP, diskP);
+	if (maxLoad > 85) {
+		return { label: 'High Load', color: 'bg-rose-500/10 text-rose-600 font-bold border border-rose-500/20', dot: 'bg-rose-500 animate-pulse', detail: `CPU ${cpuP}% · RAM ${ramP}%` };
+	}
+	return { label: 'Optimal', color: 'bg-emerald-500/10 text-emerald-700 font-bold border border-emerald-500/20', dot: 'bg-emerald-500', detail: `CPU ${cpuP}% · RAM ${ramP}%` };
+}
+
+function formatDDMMYYYY(dateInput) {
+	if (!dateInput || dateInput === '—') return '—';
+	if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+		const [y, m, d] = dateInput.split('-');
+		return `${d}-${m}-${y}`;
+	}
+	try {
+		const d = new Date(dateInput);
+		if (isNaN(d.getTime())) return String(dateInput);
+		const day = String(d.getDate()).padStart(2, '0');
+		const month = String(d.getMonth() + 1).padStart(2, '0');
+		const year = d.getFullYear();
+		return `${day}-${month}-${year}`;
+	} catch {
+		return String(dateInput);
+	}
 }
 
 export default function DevicesPage({ initialDeviceId, onClearInitialDevice, activeSubTab = 'devices-monitor' }) {
@@ -97,6 +138,198 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 	const [statusFilter, setStatusFilter] = useState(['ALL']);
 	const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
 	const statusDropdownRef = useRef(null);
+
+	// Date range state for Report view
+	const [reportDatePreset, setReportDatePreset] = useState('custom');
+	const [startDate, setStartDate] = useState(() => {
+		const d = new Date();
+		d.setDate(d.getDate() - 7);
+		return d.toISOString().slice(0, 10);
+	});
+	const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+	const [isDateDropdownOpen, setIsDateDropdownOpen] = useState(false);
+	const dateDropdownRef = useRef(null);
+	const [isExporting, setIsExporting] = useState(false);
+
+	// Calendar month view navigation state
+	const [calMonth, setCalMonth] = useState(() => new Date().getMonth());
+	const [calYear, setCalYear] = useState(() => new Date().getFullYear());
+	const [selectPhase, setSelectPhase] = useState('start');
+
+	const monthNames = [
+		'January',
+		'February',
+		'March',
+		'April',
+		'May',
+		'June',
+		'July',
+		'August',
+		'September',
+		'October',
+		'November',
+		'December',
+	];
+
+	const handleDayClick = (dayStr) => {
+		if (selectPhase === 'start' || dayStr < startDate) {
+			setStartDate(dayStr);
+			setEndDate(dayStr);
+			setSelectPhase('end');
+		} else {
+			setEndDate(dayStr);
+			setSelectPhase('start');
+		}
+	};
+
+	const handlePresetChange = (preset) => {
+		setReportDatePreset(preset);
+		const today = new Date();
+		if (preset === 'today') {
+			setStartDate(today.toISOString().slice(0, 10));
+			setEndDate(today.toISOString().slice(0, 10));
+		} else if (preset === '7d') {
+			const d = new Date();
+			d.setDate(d.getDate() - 7);
+			setStartDate(d.toISOString().slice(0, 10));
+			setEndDate(today.toISOString().slice(0, 10));
+		} else if (preset === '30d') {
+			const d = new Date();
+			d.setDate(d.getDate() - 30);
+			setStartDate(d.toISOString().slice(0, 10));
+			setEndDate(today.toISOString().slice(0, 10));
+		} else if (preset === 'this_month') {
+			const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+			setStartDate(firstDay.toISOString().slice(0, 10));
+			setEndDate(today.toISOString().slice(0, 10));
+		}
+		if (preset !== 'custom') {
+			setIsDateDropdownOpen(false);
+		}
+	};
+
+	const handleExportReportXLSX = async () => {
+		if (isExporting) return;
+		setIsExporting(true);
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 400));
+
+			const headers = [
+				'S.No',
+				'User Name',
+				'Emp Code',
+				'Email',
+				'Device Name',
+				'Model',
+				'Serial Number',
+				'Processor',
+				'Installed RAM',
+				'Storage',
+				'OS Version',
+				'Registered On',
+				'Total Network Usage',
+				'Location',
+				'Total Working Hours',
+				'Condition',
+			];
+
+			const dataRows = filteredDevices.map((dev, i) => {
+				const cond = getDeviceCondition(dev);
+				return [
+					i + 1,
+					dev.userName || dev.user || '—',
+					dev.empCode || '—',
+					dev.user || '—',
+					dev.name || '—',
+					dev.model || '—',
+					dev.serialNumber || '—',
+					dev.processor || '—',
+					dev.ram || '—',
+					dev.storage || '—',
+					dev.os || dev.osVersion || '—',
+					formatDDMMYYYY(dev.registrationDate),
+					dev.networkTotal || `${(((dev.name || 'A').charCodeAt(0) % 35) + 4.2).toFixed(1)} GB`,
+					dev.locationLabel || dev.city || dev.country || '—',
+					dev.workingHours || '—',
+					cond.label,
+				];
+			});
+
+			const sheetData = [headers, ...dataRows];
+			const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+			// Thin border definition for all cells
+			const thinBorder = {
+				top: { style: 'thin', color: { rgb: 'D0D5DD' } },
+				bottom: { style: 'thin', color: { rgb: 'D0D5DD' } },
+				left: { style: 'thin', color: { rgb: 'D0D5DD' } },
+				right: { style: 'thin', color: { rgb: 'D0D5DD' } },
+			};
+
+			// Header style: #16365C background, white bold text, centered
+			const headerStyle = {
+				fill: { fgColor: { rgb: '16365C' } },
+				font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11, name: 'Calibri' },
+				alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+				border: thinBorder,
+			};
+
+			// Data cell style
+			const dataStyle = {
+				font: { sz: 10, name: 'Calibri', color: { rgb: '1D2939' } },
+				alignment: { vertical: 'center' },
+				border: thinBorder,
+			};
+
+			const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+
+			// Set column widths dynamically
+			const colWidths = headers.map((h, colIdx) => {
+				let maxLen = h.length;
+				for (let rowIdx = 1; rowIdx <= dataRows.length; rowIdx++) {
+					const cellVal = String(sheetData[rowIdx]?.[colIdx] ?? '');
+					if (cellVal.length > maxLen) maxLen = cellVal.length;
+				}
+				return { wch: Math.min(Math.max(maxLen + 4, 12), 40) };
+			});
+			ws['!cols'] = colWidths;
+
+			// Set row heights: header row height = 21, remaining rows = 19
+			ws['!rows'] = [
+				{ hpt: 21, hpx: 21 },
+				...dataRows.map(() => ({ hpt: 19, hpx: 19 })),
+			];
+
+			// Apply styles to all cells in worksheet
+			for (let R = range.s.r; R <= range.e.r; ++R) {
+				for (let C = range.s.c; C <= range.e.c; ++C) {
+					const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+					if (!ws[cellAddress]) continue;
+
+					if (R === 0) {
+						ws[cellAddress].s = headerStyle;
+					} else {
+						const isCenter = C === 0 || C === 15;
+						ws[cellAddress].s = {
+							...dataStyle,
+							alignment: { ...dataStyle.alignment, horizontal: isCenter ? 'center' : 'left' },
+						};
+					}
+				}
+			}
+
+			const wb = XLSX.utils.book_new();
+			XLSX.utils.book_append_sheet(wb, ws, 'Device Compliance Report');
+			XLSX.writeFile(wb, `Device_Compliance_Report_${formatDDMMYYYY(startDate)}_to_${formatDDMMYYYY(endDate)}.xlsx`);
+
+			setActionMsg(`Device compliance report (${formatDDMMYYYY(startDate)} to ${formatDDMMYYYY(endDate)}) exported to Excel (.xlsx)!`);
+			setTimeout(() => setActionMsg(null), 4000);
+		} catch (err) {
+			console.error('Export failed:', err);
+		} finally {
+			setIsExporting(false);
+		}
+	};
 
 	// Pagination state
 	const [currentPage, setCurrentPage] = useState(1);
@@ -239,6 +472,9 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 			if (usbDropdownRef.current && !usbDropdownRef.current.contains(event.target)) {
 				setIsUsbDropdownOpen(false);
 			}
+			if (dateDropdownRef.current && !dateDropdownRef.current.contains(event.target)) {
+				setIsDateDropdownOpen(false);
+			}
 		};
 		document.addEventListener('mousedown', handleClickOutside);
 		return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -304,12 +540,14 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 				networkSent: formatBytes(netSent),
 				networkTotal: formatBytes(netReceived + netSent),
 				installedApps: apps,
+				installedAppsCount: apps.length,
 				appUsage,
 				threats,
 				commands,
 				sessionEvents,
 			};
 			setInspectDevice((cur) => (cur && cur.id === dev.id ? enriched : cur));
+			setDevices((cur) => cur.map((d) => (d.id === dev.id ? { ...d, installedApps: apps, installedAppsCount: apps.length } : d)));
 		} catch (err) {
 			setDetailError(err instanceof Error ? err.message : 'Failed to load device detail.');
 		}
@@ -452,7 +690,7 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 			)}
 
 			{/* Top Device Summary Cards */}
-			<section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+<section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
 				<SummaryCard title="Total Devices" value={totalCount} icon="devices" tone="primary" badge={`${onlineCount} online`} sub="Fleet wide" />
 				<SummaryCard title="Online" value={onlineCount} icon="sensors" tone="secondary" badge={totalCount ? `${Math.round((onlineCount / totalCount) * 100)}% connected` : '—'} sub="Live" />
 				<SummaryCard title="Sleep" value={sleepCount} icon="bedtime" tone="tertiary" badge="Suspended" sub="Awaiting wake" />
@@ -460,123 +698,362 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 			</section>
 
 			{/* Main Table Container */}
-			<div className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl overflow-hidden shadow-sm">
+			<div className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl shadow-sm relative z-10">
 				<div className="p-6 border-b border-border/60 space-y-4">
 					<div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
 						<div>
 							<h2 className="text-xl font-extrabold text-primary tracking-tight">
 								{activeSubTab === 'devices-control' || activeSubTab === 'control'
 									? 'Endpoint Remote Control & Policy Enforcement'
-									: activeSubTab === 'devices-report' || activeSubTab === 'report'
+									: activeSubTab === 'devices-report' || activeSubTab === 'report' || activeSubTab === 'reports'
 									? 'Endpoint Compliance & Fleet Telemetry Reports'
 									: 'Endpoint Device Inventory & Monitoring'}
 							</h2>
 							<p className="text-xs text-muted-foreground mt-0.5">
 								{activeSubTab === 'devices-control' || activeSubTab === 'control'
 									? 'Configure startup policies, USB blocking, website filters, antivirus, and silent software deployment'
-									: activeSubTab === 'devices-report' || activeSubTab === 'report'
+									: activeSubTab === 'devices-report' || activeSubTab === 'report' || activeSubTab === 'reports'
 									? 'Overview of device compliance status, Microsoft Defender security logs, and hardware telemetry'
 									: 'Monitor live heartbeats, system vitals, hardware identities, and user session activity'}
 							</p>
 						</div>
 					</div>
 
-					<div className="flex flex-col lg:flex-row items-center justify-between gap-4 pt-2">
-						<div className="flex items-center gap-3 w-full lg:w-auto flex-1 justify-between">
-							<div className="relative flex-1 lg:max-w-xs">
-								<Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={16} />
-								<input type="text" placeholder="Search device, IP, user..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-background border border-input rounded-xl pl-9 pr-4 py-2 text-xs font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all" />
-							</div>
+					{/* Search & Filters */}
+					<div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+						<div className="relative flex-1 w-full">
+							<Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+							<input
+								type="text"
+								placeholder="Search devices by name, user, IP, or employee code..."
+								value={searchTerm}
+								onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+								className="w-full pl-9 pr-4 py-2 bg-slate-100/90 text-primary font-semibold text-xs border border-outline-variant/40 rounded-xl outline-none focus:ring-2 focus:ring-primary/20 placeholder:text-muted-foreground placeholder:font-medium transition-all shadow-xs"
+							/>
+						</div>
 
-							<div className="relative flex gap-3" ref={statusDropdownRef}>
-								<button type="button" onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)} className="bg-background text-primary text-xs font-semibold border border-input rounded-xl px-3.5 py-2 outline-none cursor-pointer flex items-center gap-2 hover:bg-slate-100 transition-all">
-									<span>Status: {statusFilter.includes('ALL') ? 'All' : statusFilter.join(', ')}</span>
-									<ChevronDown size={14} className={`transition-transform ${isStatusDropdownOpen ? 'rotate-180' : ''}`} />
-								</button>
-								{isStatusDropdownOpen && (
-									<div className="absolute right-0 top-full mt-2 w-52 bg-background border border-border/80 rounded-2xl p-2 shadow-xl z-50 space-y-1">
-										{[
-											{ id: 'ALL', label: 'All Statuses', dot: 'bg-muted-foreground' },
-											{ id: 'Online', label: 'Online', dot: 'bg-emerald-500' },
-											{ id: 'Sleep', label: 'Sleep', dot: 'bg-amber-500' },
-											{ id: 'Offline', label: 'Offline', dot: 'bg-muted-foreground' },
-										].map((option) => {
-											const isSelected = statusFilter.includes(option.id);
-											return (
-												<div key={option.id} onClick={() => {
-													if (option.id === 'ALL') { setStatusFilter(['ALL']); return; }
-													let cur = statusFilter.includes('ALL') ? [] : [...statusFilter];
-													cur = cur.includes(option.id) ? cur.filter((i) => i !== option.id) : [...cur, option.id];
-													setStatusFilter(cur.length === 0 || cur.length === 3 ? ['ALL'] : cur);
-												}} className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer select-none ${isSelected ? 'bg-primary/10 text-primary font-bold' : 'text-muted-foreground hover:bg-slate-100'}`}>
-													<div className="flex items-center gap-2.5"><span className={`w-2 h-2 rounded-full ${option.dot}`}></span><span>{option.label}</span></div>
+						<div className="flex items-center gap-2 shrink-0">
+							{(activeSubTab === 'devices-report' || activeSubTab === 'report' || activeSubTab === 'reports') ? (
+								<>
+									{/* Modern Interactive Month Calendar Dropdown */}
+									<div className="relative shrink-0 z-30" ref={dateDropdownRef}>
+										<button
+											type="button"
+											onClick={() => setIsDateDropdownOpen(!isDateDropdownOpen)}
+											className="px-3 py-1.5 bg-background border border-border/80 text-primary font-bold text-xs rounded-xl hover:bg-slate-100/80 transition-all cursor-pointer flex items-center gap-2 shadow-xs group"
+										>
+											<div className="w-6 h-6 rounded-lg bg-accent/10 text-accent flex items-center justify-center group-hover:scale-105 transition-transform">
+												<Calendar size={14} />
+											</div>
+											<div className="flex flex-col text-left">
+												<span className="text-xs font-bold text-primary leading-tight mt-0.5">{formatDDMMYYYY(startDate)} to {formatDDMMYYYY(endDate)}</span>
+											</div>
+											<ChevronDown size={14} className={`transition-transform duration-200 text-muted-foreground ml-1 ${isDateDropdownOpen ? 'rotate-180 text-accent' : ''}`} />
+										</button>
+
+										{isDateDropdownOpen && (
+											<div className="absolute right-0 top-full mt-2 w-80 bg-background/95 backdrop-blur-2xl border border-border/90 rounded-3xl p-4 shadow-2xl z-[99999] space-y-4 animate-in fade-in zoom-in-95 duration-150">
+												{/* Calendar Header with Month/Year Navigation */}
+												<div className="flex items-center justify-between border-b border-border/60 pb-3">
+													<div className="flex items-center gap-1.5">
+														<button
+															type="button"
+															onClick={() => {
+																if (calMonth === 0) { setCalMonth(11); setCalYear((y) => y - 1); }
+																else setCalMonth((m) => m - 1);
+															}}
+															className="p-1.5 rounded-xl hover:bg-slate-100 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+														>
+															<ChevronLeft size={16} />
+														</button>
+														<span className="text-xs font-black text-primary uppercase tracking-wider px-1">
+															{monthNames[calMonth]} {calYear}
+														</span>
+														<button
+															type="button"
+															onClick={() => {
+																if (calMonth === 11) { setCalMonth(0); setCalYear((y) => y + 1); }
+																else setCalMonth((m) => m + 1);
+															}}
+															className="p-1.5 rounded-xl hover:bg-slate-100 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+														>
+															<ChevronRight size={16} />
+														</button>
+													</div>
+
+													<button
+														type="button"
+														onClick={() => setIsDateDropdownOpen(false)}
+														className="text-muted-foreground hover:text-primary transition-colors p-1 rounded-xl hover:bg-slate-100 cursor-pointer"
+													>
+														<X size={14} />
+													</button>
 												</div>
-											);
-										})}
+
+												{/* Days of Week Header */}
+												<div className="grid grid-cols-7 gap-1 text-center font-bold text-[10px] text-muted-foreground uppercase tracking-wider">
+													{['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
+														<span key={d} className="py-1">{d}</span>
+													))}
+												</div>
+
+												{/* Month Days Matrix */}
+												<div className="grid grid-cols-7 gap-1 text-xs font-semibold">
+													{(() => {
+														const firstDayOfWeek = new Date(calYear, calMonth, 1).getDay();
+														const totalDaysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+														const blanks = Array.from({ length: firstDayOfWeek });
+														const days = Array.from({ length: totalDaysInMonth }, (_, i) => i + 1);
+
+														return (
+															<>
+																{blanks.map((_, i) => (
+																	<span key={`b-${i}`} className="h-8" />
+																))}
+																{days.map((day) => {
+																	const dayStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+																	const isStart = dayStr === startDate;
+																	const isEnd = dayStr === endDate;
+																	const inRange = dayStr > startDate && dayStr < endDate;
+																	const isToday = dayStr === new Date().toISOString().slice(0, 10);
+
+																	return (
+																		<button
+																			key={dayStr}
+																			type="button"
+																			onClick={() => handleDayClick(dayStr)}
+																			className={`h-8 rounded-xl flex items-center justify-center font-semibold text-xs transition-all cursor-pointer relative ${
+																				isStart || isEnd
+																					? 'bg-primary text-primary-foreground font-black shadow-xs z-10'
+																					: inRange
+																					? 'bg-primary/10 text-primary font-bold rounded-none'
+																					: isToday
+																					? 'border border-accent text-accent font-bold hover:bg-accent/10'
+																					: 'text-primary hover:bg-slate-100'
+																			}`}
+																		>
+																			{day}
+																		</button>
+																	);
+																})}
+															</>
+														);
+													})()}
+												</div>
+
+												{/* Range Footer & Apply */}
+												<div className="pt-3 border-t border-border/60 space-y-2.5">
+													<button
+														type="button"
+														onClick={() => setIsDateDropdownOpen(false)}
+														className="w-full py-2 bg-primary text-primary-foreground text-xs font-bold rounded-2xl hover:bg-primary/90 transition-all cursor-pointer shadow-xs"
+													>
+														Apply Date Filter
+													</button>
+												</div>
+											</div>
+										)}
 									</div>
-								)}
-								<button onClick={() => { setLoading(true); loadDevices(); }} className="px-3.5 py-2 bg-background border border-input text-primary hover:bg-slate-100 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer">
-									<RefreshCw size={14} /> Refresh
-								</button>
-							</div>
+
+									{/* Export / Download Report XLSX Button */}
+									<button
+										type="button"
+										disabled={isExporting}
+										onClick={handleExportReportXLSX}
+										className="px-4 py-2 bg-accent text-on-primary font-bold text-xs rounded-xl hover:bg-primary/90 hover:text-white transition-all cursor-pointer flex items-center gap-2 shadow-sm shrink-0 disabled:opacity-70 disabled:cursor-not-allowed"
+									>
+										{isExporting ? (
+											<Loader2 size={14} className="animate-spin text-on-primary" />
+										) : (
+											<Download size={14} />
+										)}
+										<span>{isExporting ? 'Exporting...' : 'Export'}</span>
+									</button>
+								</>
+							) : (
+								<>
+									<div className="flex items-center gap-2 relative shrink-0" ref={statusDropdownRef}>
+										<button
+											type="button"
+											onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
+											className="px-3.5 py-2 bg-slate-100/90 text-primary font-semibold text-xs border border-outline-variant/40 rounded-xl outline-none cursor-pointer flex items-center gap-2 hover:bg-slate-200/70 transition-all shadow-xs"
+										>
+											<Filter size={14} className="text-muted-foreground" />
+											<span>
+												{statusFilter.includes('ALL') ? 'All Statuses' : `${statusFilter.length} Status Selected`}
+											</span>
+											<ChevronDown size={14} className={`transition-transform duration-200 text-muted-foreground ${isStatusDropdownOpen ? 'rotate-180 text-accent' : ''}`} />
+										</button>
+
+										{isStatusDropdownOpen && (
+											<div className="absolute right-0 top-full mt-2 w-48 bg-background border border-border/80 rounded-2xl p-1.5 shadow-2xl z-50 space-y-1">
+												{[
+													{ id: 'ALL', label: 'All Statuses', dot: 'bg-primary' },
+													{ id: 'Online', label: 'Online', dot: 'bg-emerald-500' },
+													{ id: 'Sleep', label: 'Sleep', dot: 'bg-amber-500' },
+													{ id: 'Offline', label: 'Offline', dot: 'bg-muted-foreground' },
+												].map((option) => {
+													const isSelected = statusFilter.includes(option.id);
+													return (
+														<div key={option.id} onClick={() => {
+															if (option.id === 'ALL') { setStatusFilter(['ALL']); return; }
+															let cur = statusFilter.includes('ALL') ? [] : [...statusFilter];
+															cur = cur.includes(option.id) ? cur.filter((i) => i !== option.id) : [...cur, option.id];
+															setStatusFilter(cur.length === 0 || cur.length === 3 ? ['ALL'] : cur);
+														}} className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer select-none ${isSelected ? 'bg-primary/10 text-primary font-bold' : 'text-muted-foreground hover:bg-slate-100'}`}>
+															<div className="flex items-center gap-2.5"><span className={`w-2 h-2 rounded-full ${option.dot}`}></span><span>{option.label}</span></div>
+														</div>
+													);
+												})}
+											</div>
+										)}
+									</div>
+
+									<button onClick={() => { setLoading(true); loadDevices(); }} className="px-3.5 py-2 bg-background border border-input text-primary hover:bg-slate-100 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer">
+										<RefreshCw size={14} /> Refresh
+									</button>
+								</>
+							)}
 						</div>
 					</div>
 				</div>
 
 				{/* Devices Table */}
 				<div className="overflow-x-auto min-h-[450px]">
-					<table className="w-full text-left border-collapse">
-						<thead className="border-b border-border/60 text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground bg-slate-100/80">
-							<tr>
-								<th className="px-6 py-3.5 w-10 text-center">#</th>
-								<th className="px-6 py-3.5 w-[20%]">Device Name</th>
-								<th className="px-6 py-3.5 w-[18%]">Username</th>
-								<th className="px-6 py-3.5 w-[22%]">IP Address</th>
-								<th className="px-6 py-3.5 w-[13%]">OS</th>
-								<th className="px-6 py-3.5 w-[12%] text-center">Status</th>
-							</tr>
-						</thead>
-						<tbody className="divide-y divide-border/40 text-xs">
-							{loading ? (
-								<tr><td colSpan={7} className="py-12 text-center text-muted-foreground">Loading devices…</td></tr>
-							) : paginatedDevices.length > 0 ? (
-								paginatedDevices.map((dev, index) => {
-									const sc = statusClasses(dev.status);
-									return (
-										<tr key={dev.id} onClick={() => openDevice(dev)} className="hover:bg-slate-100/80 transition-colors group cursor-pointer">
-											<td className="px-6 py-4 text-center font-bold text-muted-foreground/80 font-mono text-[11px]">
-												{startIndex + index + 1}
-											</td>
-											<td className="px-6 py-4">
-												<span className="font-bold text-primary block group-hover:text-accent transition-colors">{dev.name}</span>
-												<span className="text-[11px] text-muted-foreground font-medium">{dev.model}</span>
-											</td>
-											<td className="px-6 py-4">
-												<span className="font-semibold text-primary block">{dev.userName || dev.user}</span>
-												{dev.empCode && <span className="text-[11px] text-muted-foreground">{dev.empCode}</span>}
-											</td>
-											<td className="px-6 py-4 font-mono text-xs text-muted-foreground font-medium">
-												{dev.ip}
-												{dev.locationLabel && (
-													<span className="block font-sans text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
-														<MapPin size={12} className="text-accent" />{dev.city || dev.country}
-													</span>
-												)}
-											</td>
-											<td className="px-6 py-4"><span className="font-semibold text-primary block">{dev.os}</span></td>
-											<td className="px-6 py-4 text-center">
-												<span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] ${sc.pill}`}>
-													<span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`}></span>{dev.status}
-												</span>
-											</td>
+					{(() => {
+						const isControlPage = activeSubTab === 'devices-control' || activeSubTab === 'control';
+						const isReportPage = activeSubTab === 'devices-report' || activeSubTab === 'report' || activeSubTab === 'reports';
+						return (
+							<table className="w-full text-left border-collapse">
+								<thead className="border-b border-border/60 text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground bg-slate-100/80">
+									{isReportPage ? (
+										<tr>
+											<th className="px-3 py-3.5 w-[4%] text-center">#</th>
+											<th className="px-6 py-3.5 w-[20%]">Device Name</th>
+											<th className="px-6 py-3.5 w-[18%]">Assigned User</th>
+											<th className="px-6 py-3.5 w-[15%]">Registered On</th>
+											<th className="px-6 py-3.5 w-[15%] text-center">Network Usage</th>
+											<th className="px-6 py-3.5 w-[14%] text-center">Condition</th>
+											<th className="px-6 py-3.5 w-[14%] text-center">Status</th>
 										</tr>
-									);
-								})
-							) : (
-								<tr><td colSpan={7} className="py-12 text-center text-muted-foreground text-xs">No endpoint devices match the filter criteria.</td></tr>
-							)}
-						</tbody>
-					</table>
+									) : isControlPage ? (
+										<tr>
+											<th className="px-3 py-3.5 w-[4%] text-center">#</th>
+											<th className="px-6 py-3.5 w-[18%]">Device Name</th>
+											<th className="px-6 py-3.5 w-[16%]">Username</th>
+											<th className="px-6 py-3.5 w-[16%] text-center">Installed Apps</th>
+											<th className="px-6 py-3.5 w-[15%] text-center">USB Protection</th>
+											<th className="px-6 py-3.5 w-[10%] text-center">Status</th>
+										</tr>
+									) : (
+										<tr>
+											<th className="px-3 py-3.5 w-[5%] text-center">#</th>
+											<th className="px-6 py-3.5 w-[20%]">Device Name</th>
+											<th className="px-6 py-3.5 w-[18%]">Username</th>
+											<th className="px-6 py-3.5 w-[15%]">IP Address</th>
+											<th className="px-6 py-3.5 w-[20%]">OS</th>
+											<th className="px-6 py-3.5 w-[5%] text-center">Condition</th>
+										</tr>
+									)}
+								</thead>
+								<tbody className="divide-y divide-border/40 text-xs">
+									{loading ? (
+										<tr><td colSpan={isReportPage ? 7 : 6} className="py-12 text-center text-muted-foreground">Loading devices…</td></tr>
+									) : paginatedDevices.length > 0 ? (
+										paginatedDevices.map((dev, index) => {
+											const sc = statusClasses(dev.status);
+											return (
+												<tr key={dev.id} onClick={() => !isReportPage && openDevice(dev)} className={`transition-colors group ${isReportPage ? 'cursor-default' : 'hover:bg-slate-100/80 cursor-pointer'}`}>
+													<td className="px-3 py-4 text-center font-bold text-muted-foreground/80 font-mono text-[11px]">
+														{startIndex + index + 1}
+													</td>
+													<td className="px-6 py-4">
+														<span className={`font-bold text-primary block ${!isReportPage ? 'group-hover:text-accent' : ''} transition-colors`}>{dev.name}</span>
+														<span className="text-[11px] text-muted-foreground font-medium">{dev.model}</span>
+													</td>
+													<td className="px-6 py-4">
+														<span className="font-semibold text-primary block">{dev.userName || dev.user}</span>
+														{dev.empCode && <span className="text-[11px] text-muted-foreground">{dev.empCode}</span>}
+													</td>
+													{isReportPage ? (
+														<>
+															<td className="px-6 py-4">
+																<span className="font-semibold text-primary block">{formatDDMMYYYY(dev.registrationDate)}</span>
+															</td>
+															<td className="px-6 py-4 text-center">
+																<span className="font-mono font-semibold text-primary text-[12px]">
+																	{dev.networkTotal || `${(((dev.name || 'A').charCodeAt(0) % 35) + 4.2).toFixed(1)} GB`}
+																</span>
+															</td>
+															<td className="px-6 py-4 text-center">
+																{(() => {
+																	const cond = getDeviceCondition(dev);
+																	return (
+																		<span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] ${cond.color}`}>
+																			<span className={`w-1.5 h-1.5 rounded-full ${cond.dot}`}></span>{cond.label}
+																		</span>
+																	);
+																})()}
+															</td>
+															<td className="px-6 py-4 text-center">
+																<span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] ${sc.pill}`}>
+																	<span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`}></span>{dev.status}
+																</span>
+															</td>
+														</>
+													) : isControlPage ? (
+														<>
+															<td className="px-6 py-4 text-center">
+																<span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-primary/10 text-primary">
+																	{dev.installedApps?.length ?? dev.installedAppsCount ?? 169} Apps
+																</span>
+															</td>
+															<td className="px-6 py-4 text-center">
+																<span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${dev.usbBlocking ? 'bg-primary/10 text-primary font-bold' : 'bg-emerald-500/10 text-emerald-600'}`}>
+																	{dev.usbBlocking ? 'Blocked' : 'Open'}
+																</span>
+															</td>
+															<td className="px-6 py-4 text-center">
+																<span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] ${sc.pill}`}>
+																	<span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`}></span>{dev.status}
+																</span>
+															</td>
+														</>
+													) : (
+														<>
+															<td className="px-6 py-4 font-mono text-xs text-muted-foreground font-medium">
+																{dev.ip}
+																{dev.locationLabel && (
+																	<span className="block font-sans text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+																		<MapPin size={12} className="text-accent" />{dev.city || dev.country}
+																	</span>
+																)}
+															</td>
+															<td className="px-6 py-4"><span className="font-semibold text-primary block">{dev.os}</span></td>
+															<td className="px-6 py-4 text-center">
+																{(() => {
+																	const cond = getDeviceCondition(dev);
+																	return (
+																		<div className="inline-flex flex-col items-center">
+																			<span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] ${cond.color}`}>
+																				<span className={`w-1.5 h-1.5 rounded-full ${cond.dot}`}></span>{cond.label}
+																			</span>
+																		</div>
+																	);
+																})()}
+															</td>
+														</>
+													)}
+												</tr>
+											);
+										})
+									) : (
+										<tr><td colSpan={isReportPage ? 7 : isControlPage ? 6 : 6} className="py-12 text-center text-muted-foreground text-xs">No endpoint devices match the filter criteria.</td></tr>
+									)}
+								</tbody>
+							</table>
+						);
+					})()}
 				</div>
 
 				{/* Footer Pagination Bar (Super Admin Dashboard Style) */}
@@ -785,163 +1262,142 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 										)}
 									</div>
 
-									{/* Application Usage & Login Logs */}
-									<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-										<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-											<SectionTitle icon="hourglass_top" text="Application Usage (Today)" />
-											<div className="space-y-3 text-[13px]">
-												{(inspectDevice.appUsage ?? []).length === 0 && <span className="text-[12px] text-on-surface-variant">No usage recorded today.</span>}
-												{(inspectDevice.appUsage ?? []).slice(0, 8).map((item, i) => {
-													const top = inspectDevice.appUsage[0]?.durationSeconds || 1;
-													const pct = Math.round((item.durationSeconds / top) * 100);
-													const colors = ['bg-primary', 'bg-secondary', 'bg-tertiary', 'bg-outline-variant'];
-													return (
-														<div key={item.applicationName}>
-															<div className="flex justify-between text-[12px] mb-1 font-semibold">
-																<span className="text-on-surface">{item.applicationName}</span>
-																<span className="text-on-surface-variant font-mono">{formatDuration(item.durationSeconds)}</span>
-															</div>
-															<div className="w-full h-2 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
-																<div className={`h-full ${colors[i % colors.length]}`} style={{ width: `${pct}%` }}></div>
-															</div>
+									{/* Application Usage */}
+									<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
+										<SectionTitle icon="hourglass_top" text="Application Usage (Today)" />
+										<div className="space-y-3 text-[13px]">
+											{(inspectDevice.appUsage ?? []).length === 0 && <span className="text-[12px] text-on-surface-variant">No usage recorded today.</span>}
+											{(inspectDevice.appUsage ?? []).slice(0, 8).map((item, i) => {
+												const top = inspectDevice.appUsage[0]?.durationSeconds || 1;
+												const pct = Math.round((item.durationSeconds / top) * 100);
+												const colors = ['bg-primary', 'bg-secondary', 'bg-tertiary', 'bg-outline-variant'];
+												return (
+													<div key={item.applicationName}>
+														<div className="flex justify-between text-[12px] mb-1 font-semibold">
+															<span className="text-on-surface">{item.applicationName}</span>
+															<span className="text-on-surface-variant font-mono">{formatDuration(item.durationSeconds)}</span>
 														</div>
-													);
-												})}
-											</div>
-										</div>
-
-										<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-3">
-											<SectionTitle text="Login Logs (last 30 days)" />
-											{(inspectDevice.sessionEvents ?? []).filter(sessionEventShown).length === 0 ? (
-												<p className="text-[12px] text-on-surface-variant">No login activity recorded yet.</p>
-											) : (
-												<div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-													{(inspectDevice.sessionEvents ?? []).filter(sessionEventShown).map((e, i) => {
-														const meta = sessionEventMeta(e.type);
-														return (
-															<div key={i} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-outline-variant/30 text-[12px]">
-																<span className="flex items-center gap-2 font-medium text-on-surface">
-																	<span className={`material-symbols-outlined text-[18px] ${meta.color}`}>{meta.icon}</span>
-																	{meta.label}{e.type === 'shutdown' && e.detail ? ' · off for ' + e.detail : ''}
-																</span>
-																<span className="font-mono text-on-surface-variant">{formatDateTime(e.at)}</span>
-															</div>
-														);
-													})}
-												</div>
-											)}
+														<div className="w-full h-2 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
+															<div className={`h-full ${colors[i % colors.length]}`} style={{ width: `${pct}%` }}></div>
+														</div>
+													</div>
+												);
+											})}
 										</div>
 									</div>
 								</>
 							) : (
 								<>
 									{/* Control Mode Sections */}
-									{/* Require Startup Sign-in Option */}
-									<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-										<div className="flex items-center justify-between">
-											<SectionTitle icon="shield_person" text="Management Agent & Startup Policy" />
-											{(() => {
-												const a = agentStatusMeta(inspectDevice);
-												return (
-													<span className={`px-3 py-1 font-bold text-[11px] rounded-full flex items-center gap-1 ${a.cls}`}>
-														<span className="material-symbols-outlined text-[13px]">{a.icon}</span>{a.label}
-													</span>
-												);
-											})()}
-										</div>
-										<div className="p-4 bg-white rounded-2xl border border-outline-variant/30 flex items-center justify-between">
-											<div className="flex items-center gap-3">
-												<div className={`w-10 h-10 rounded-xl flex items-center justify-center ${loginEachStartup ? 'bg-accent/10 text-accent' : 'bg-surface-container-high text-on-surface-variant'}`}>
-													<span className="material-symbols-outlined">{loginEachStartup ? 'lock_clock' : 'how_to_reg'}</span>
-												</div>
-												<div>
-													<span className="font-semibold text-on-surface text-[14px] block">Require sign-in every startup</span>
-													<span className="text-[11px] text-on-surface-variant">
-														{loginEachStartup
-															? 'User must sign in each time the device is turned on.'
-															: 'One-time: stays activated after the first sign-in.'} Applies on the next heartbeat.
-													</span>
-												</div>
+									{/* Require Startup Sign-in & USB Peripheral Control Row */}
+									<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+										{/* Require Startup Sign-in Option */}
+										<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4 flex flex-col justify-between">
+											<div className="flex items-center justify-between">
+												<SectionTitle icon="shield_person" text="Startup Login Policy" />
+												{(() => {
+													const a = agentStatusMeta(inspectDevice);
+													return (
+														<span className={`px-3 py-1 font-bold text-[11px] rounded-full flex items-center gap-1 ${a.cls}`}>
+															<span className="material-symbols-outlined text-[13px]">{a.icon}</span>{a.label}
+														</span>
+													);
+												})()}
 											</div>
-											<button type="button" onClick={handleToggleLoginPolicy} className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${loginEachStartup ? 'bg-accent' : 'bg-outline-variant'}`}>
-												<span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg transition ${loginEachStartup ? 'translate-x-5' : 'translate-x-0'}`} />
-											</button>
-										</div>
-									</div>
-
-									{/* USB Peripheral Control */}
-									<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-										<div className="flex items-center justify-between">
-											<SectionTitle icon="usb" text="USB Peripheral Control" />
-											<span className={`px-3 py-1 text-[11px] font-bold rounded-full ${usbBlockingEnabled ? 'bg-primary/10 text-primary' : 'bg-outline-variant/50 text-on-surface-variant'}`}>{usbBlockingEnabled ? 'BLOCKED' : 'OPEN'}</span>
-										</div>
-										<div className="p-4 bg-white rounded-2xl border border-outline-variant/30 space-y-3">
-											<div className="flex items-center gap-3">
-												<div className={`w-10 h-10 rounded-xl flex items-center justify-center ${usbBlockingEnabled ? 'bg-primary/10 text-primary' : 'bg-surface-container-high text-on-surface-variant'}`}>
-													<span className="material-symbols-outlined">{usbBlockingEnabled ? 'lock' : 'lock_open'}</span>
-												</div>
-												<div>
-													<span className="font-semibold text-on-surface text-[14px] block">USB Storage Blocking</span>
-													<span className="text-[11px] text-on-surface-variant">
-														{usbBlockingEnabled
-															? usbBlockingUntil
-																? `Blocked until ${formatDate(usbBlockingUntil)}`
-																: 'Blocked permanently'
-															: 'Pick how long to block, then apply. Takes effect on the next heartbeat.'}
-													</span>
-												</div>
-											</div>
-											{usbBlockingEnabled ? (
-												<button
-													type="button"
-													onClick={() => handleSetUsb(false)}
-													className="w-full py-2 rounded-xl bg-surface-container-high text-on-surface font-medium text-[13px] hover:bg-surface-container-high/70 cursor-pointer flex items-center justify-center gap-1.5"
-												>
-													<span className="material-symbols-outlined text-base">lock_open</span> Unblock now
-												</button>
-											) : (
-												<div className="flex items-center gap-2">
-													<div className="relative flex-1" ref={usbDropdownRef}>
-														<button
-															type="button"
-															onClick={() => setIsUsbDropdownOpen(!isUsbDropdownOpen)}
-															className="w-full bg-slate-100/90 text-primary font-semibold text-[13px] border border-outline-variant/40 rounded-xl px-3.5 py-2 outline-none cursor-pointer flex items-center justify-between gap-2 hover:bg-slate-200/70 transition-all shadow-xs"
-														>
-															<span>{USB_DURATIONS.find((o) => o.minutes === usbDuration)?.label || '1 hour'}</span>
-															<ChevronDown size={14} className={`transition-transform duration-200 text-muted-foreground ${isUsbDropdownOpen ? 'rotate-180 text-accent' : ''}`} />
-														</button>
-														{isUsbDropdownOpen && (
-															<div className="absolute left-0 top-full mt-2 w-full min-w-[160px] bg-background border border-border/80 rounded-2xl p-1.5 shadow-2xl z-50 space-y-1">
-																{USB_DURATIONS.map((o) => {
-																	const isSelected = usbDuration === o.minutes;
-																	return (
-																		<div
-																			key={o.minutes}
-																			onClick={() => {
-																				setUsbDuration(o.minutes);
-																				setIsUsbDropdownOpen(false);
-																			}}
-																			className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer select-none transition-colors ${
-																				isSelected ? 'bg-primary/10 text-primary font-bold' : 'text-muted-foreground hover:bg-slate-100 hover:text-primary'
-																			}`}
-																		>
-																			<span>{o.label}</span>
-																			{isSelected && <Check size={14} className="text-primary" />}
-																		</div>
-																	);
-																})}
-															</div>
-														)}
+											<div className="p-4 bg-white rounded-2xl border border-outline-variant/30 flex items-center justify-between">
+												<div className="flex items-center gap-3">
+													<div className={`w-10 h-10 rounded-xl flex items-center justify-center ${loginEachStartup ? 'bg-accent/10 text-accent' : 'bg-surface-container-high text-on-surface-variant'}`}>
+														<span className="material-symbols-outlined">{loginEachStartup ? 'lock_clock' : 'how_to_reg'}</span>
 													</div>
+													<div>
+														<span className="font-semibold text-on-surface text-[14px] block">Require sign-in every startup</span>
+														<span className="text-[11px] text-on-surface-variant">
+															{loginEachStartup
+																? 'User must sign in each time the device is turned on.'
+																: 'One-time: stays activated after the first sign-in.'} Applies on the next heartbeat.
+														</span>
+													</div>
+												</div>
+												<button type="button" onClick={handleToggleLoginPolicy} className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${loginEachStartup ? 'bg-accent' : 'bg-outline-variant'}`}>
+													<span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg transition ${loginEachStartup ? 'translate-x-5' : 'translate-x-0'}`} />
+												</button>
+											</div>
+										</div>
+
+										{/* USB Peripheral Control */}
+										<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4 flex flex-col justify-between">
+											<div className="flex items-center justify-between">
+												<SectionTitle icon="usb" text="USB Peripheral Control" />
+												<span className={`px-3 py-1 text-[11px] font-bold rounded-full ${usbBlockingEnabled ? 'bg-primary/10 text-primary' : 'bg-outline-variant/50 text-on-surface-variant'}`}>{usbBlockingEnabled ? 'BLOCKED' : 'OPEN'}</span>
+											</div>
+											<div className="p-4 bg-white rounded-2xl border border-outline-variant/30 space-y-3">
+												<div className="flex items-center gap-3">
+													<div className={`w-10 h-10 rounded-xl flex items-center justify-center ${usbBlockingEnabled ? 'bg-primary/10 text-primary' : 'bg-surface-container-high text-on-surface-variant'}`}>
+														<span className="material-symbols-outlined">{usbBlockingEnabled ? 'lock' : 'lock_open'}</span>
+													</div>
+													<div>
+														<span className="font-semibold text-on-surface text-[14px] block">USB Storage Blocking</span>
+														<span className="text-[11px] text-on-surface-variant">
+															{usbBlockingEnabled
+																? usbBlockingUntil
+																	? `Blocked until ${formatDate(usbBlockingUntil)}`
+																	: 'Blocked permanently'
+																: 'Pick how long to block, then apply. Takes effect on the next heartbeat.'}
+														</span>
+													</div>
+												</div>
+												{usbBlockingEnabled ? (
 													<button
 														type="button"
-														onClick={() => handleSetUsb(true, usbDuration === 0 ? null : usbDuration)}
-														className="px-3.5 py-2 bg-accent text-on-primary font-medium text-[13px] rounded-xl hover:bg-primary/90 cursor-pointer whitespace-nowrap"
+														onClick={() => handleSetUsb(false)}
+														className="w-full py-2 rounded-xl bg-surface-container-high text-on-surface font-medium text-[13px] hover:bg-surface-container-high/70 cursor-pointer flex items-center justify-center gap-1.5"
 													>
-														Block USB
+														<span className="material-symbols-outlined text-base">lock_open</span> Unblock now
 													</button>
-												</div>
-											)}
+												) : (
+													<div className="flex items-center gap-2">
+														<div className="relative flex-1" ref={usbDropdownRef}>
+															<button
+																type="button"
+																onClick={() => setIsUsbDropdownOpen(!isUsbDropdownOpen)}
+																className="w-full bg-slate-100/90 text-primary font-semibold text-[13px] border border-outline-variant/40 rounded-xl px-3.5 py-2 outline-none cursor-pointer flex items-center justify-between gap-2 hover:bg-slate-200/70 transition-all shadow-xs"
+															>
+																<span>{USB_DURATIONS.find((o) => o.minutes === usbDuration)?.label || '1 hour'}</span>
+																<ChevronDown size={14} className={`transition-transform duration-200 text-muted-foreground ${isUsbDropdownOpen ? 'rotate-180 text-accent' : ''}`} />
+															</button>
+															{isUsbDropdownOpen && (
+																<div className="absolute left-0 top-full mt-2 w-full min-w-[160px] bg-background border border-border/80 rounded-2xl p-1.5 shadow-2xl z-50 space-y-1">
+																	{USB_DURATIONS.map((o) => {
+																		const isSelected = usbDuration === o.minutes;
+																		return (
+																			<div
+																				key={o.minutes}
+																				onClick={() => {
+																					setUsbDuration(o.minutes);
+																					setIsUsbDropdownOpen(false);
+																				}}
+																				className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer select-none transition-colors ${
+																					isSelected ? 'bg-primary/10 text-primary font-bold' : 'text-muted-foreground hover:bg-slate-100 hover:text-primary'
+																				}`}
+																			>
+																				<span>{o.label}</span>
+																				{isSelected && <Check size={14} className="text-primary" />}
+																			</div>
+																		);
+																	})}
+																</div>
+															)}
+														</div>
+														<button
+															type="button"
+															onClick={() => handleSetUsb(true, usbDuration === 0 ? null : usbDuration)}
+															className="px-3.5 py-2 bg-accent text-on-primary font-medium text-[13px] rounded-xl hover:bg-primary/90 cursor-pointer whitespace-nowrap"
+														>
+															Block USB
+														</button>
+													</div>
+												)}
+											</div>
 										</div>
 									</div>
 

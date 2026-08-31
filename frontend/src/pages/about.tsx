@@ -228,7 +228,7 @@ export default function AboutPage() {
                 </section>
 
                 {/* ── TEAM ── */}
-                <section className="py-24 bg-muted/20">
+                {/* <section className="py-24 bg-muted/20">
                     <div className="max-w-7xl mx-auto px-6 lg:px-8">
                         <motion.div
                             initial="hidden"
@@ -263,7 +263,7 @@ export default function AboutPage() {
                                     className="group rounded-xl border border-border bg-background p-8 hover:border-accent/30 hover:shadow-md transition-all duration-300"
                                 >
                                     {/* Avatar placeholder */}
-                                    <div className="flex items-center gap-5 mb-5">
+                                    {/* <div className="flex items-center gap-5 mb-5">
                                         <div className="w-14 h-14 rounded-xl bg-primary flex items-center justify-center flex-shrink-0">
                                             <span className="text-lg font-bold text-accent tracking-tight" style={{ fontFamily: 'var(--font-heading)' }}>
                                                 {member.name.split(' ').map((n) => n[0]).join('')}
@@ -279,7 +279,7 @@ export default function AboutPage() {
                             ))}
                         </motion.div>
                     </div>
-                </section>
+                </section> */}
 
                 {/* ── CTA ── */}
                 <section className="relative py-24 bg-primary overflow-hidden">

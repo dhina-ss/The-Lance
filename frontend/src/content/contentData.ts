@@ -151,10 +151,10 @@ export const contentData = {
 		team: {
 			heading: "The people behind the work",
 			subheading: "A dedicated team of senior developers bringing custom software solutions to businesses of all sizes.",
-			members: [
-				{ id: "m1", name: "Jaykumar A", role: "Senior Manager - Engineering", bio: "7+ years of experience in Engineering Management. Obsessed with building scalable and reliable systems." },
-				{ id: "m2", name: "Dhinakaran Sekar", role: "Senior Full-Stack Developer", bio: "5+ years building distributed systems at scale. Obsessed with clean architecture and fast feedback loops." }
-			]
+			// members: [
+			// 	{ id: "m1", name: "Jaykumar A", role: "Senior Manager - Engineering", bio: "7+ years of experience in Engineering Management. Obsessed with building scalable and reliable systems." },
+			// 	{ id: "m2", name: "Dhinakaran Sekar", role: "Senior Full-Stack Developer", bio: "5+ years building distributed systems at scale. Obsessed with clean architecture and fast feedback loops." }
+			// ]
 		},
 		cta: {
 			heading: "Want to work with us?",
