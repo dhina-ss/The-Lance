@@ -633,9 +633,6 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice }) {
 								</div>
 							</div>
 							<div className="flex items-center gap-1">
-								<button onClick={async () => { if (!window.confirm(`Remove ${inspectDevice.name} and all its data? This cannot be undone.`)) return; try { await deleteDevice(inspectDevice.id); setDevices((ds) => ds.filter((d) => d.id !== inspectDevice.id)); setInspectDevice(null); notify(`${inspectDevice.name} removed.`); } catch (e) { notify(e instanceof Error ? e.message : 'Failed to remove device.'); } }} title="Remove this device" className="w-9 h-9 rounded-full hover:bg-error/10 text-error flex items-center justify-center cursor-pointer">
-									<span className="material-symbols-outlined text-xl">delete</span>
-								</button>
 								<button onClick={() => setInspectDevice(null)} className="w-9 h-9 rounded-full hover:bg-surface-container-high text-on-surface-variant flex items-center justify-center cursor-pointer">
 									<span className="material-symbols-outlined text-xl">close</span>
 								</button>
