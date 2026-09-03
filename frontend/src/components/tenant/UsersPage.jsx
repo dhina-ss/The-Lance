@@ -1,265 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom';
-import { Users, UserPlus, TrendingUp, BadgeCheck, Search, X, Mail, Lock, ShieldCheck, User, Pencil, Trash2, CheckCircle2, AlertTriangle, Eye, EyeOff } from 'lucide-react';
-import { fetchUsers, createUser, updateUser, deleteUser, fetchUserLimit, relativeTime } from '../../api/ems';
+import {
+	Users, UserPlus, TrendingUp, BadgeCheck, Search, X, Mail, Lock, ShieldCheck, User,
+	Pencil, Trash2, CheckCircle2, AlertTriangle, Eye, EyeOff, Calendar, Clock, Activity,
+	LogIn, Unlock, Power, ChevronDown, Check, FileText, Bell, Laptop, ArrowRight
+} from 'lucide-react';
+import { fetchUsers, createUser, updateUser, deleteUser, fetchUserLimit, relativeTime, fetchUserLogs } from '../../api/ems';
 
 const AVATAR_BG = ['bg-primary', 'bg-accent', 'bg-emerald-600', 'bg-amber-600'];
-
-const DEFAULT_TENANT_ROLES = [
-	{
-		id: 'super_admin',
-		name: 'Super Admin',
-		isEditableName: false,
-		rules: [
-			'device_mgmt', 'device_mgmt:view', 'device_mgmt:remote_lock', 'device_mgmt:restart_shutdown', 'device_mgmt:gating',
-			'software_deploy', 'software_deploy:view', 'software_deploy:install', 'software_deploy:uninstall', 'software_deploy:upload',
-			'usb_url_rules', 'usb_url_rules:usb_blocking', 'usb_url_rules:website_blocking',
-			'user_mgmt', 'user_mgmt:view', 'user_mgmt:create', 'user_mgmt:edit', 'user_mgmt:delete',
-			'audit_geo', 'audit_geo:view_logs', 'audit_geo:live_map', 'audit_geo:export_logs',
-			'reports_export', 'reports_export:view_analytics', 'reports_export:download_pdf', 'reports_export:export_csv',
-		],
-		desc: 'Full administrative control over tenant workspace and security rules',
-	},
-	{
-		id: 'admin',
-		name: 'Admin',
-		isEditableName: false,
-		rules: [
-			'device_mgmt', 'device_mgmt:view', 'device_mgmt:remote_lock', 'device_mgmt:restart_shutdown',
-			'software_deploy', 'software_deploy:view', 'software_deploy:install',
-			'usb_url_rules', 'usb_url_rules:usb_blocking', 'usb_url_rules:website_blocking',
-			'user_mgmt', 'user_mgmt:view', 'user_mgmt:create',
-			'reports_export', 'reports_export:view_analytics', 'reports_export:download_pdf',
-		],
-		desc: 'Workspace administration and device fleet control',
-	},
-	{
-		id: 'role_1',
-		name: 'Role 1',
-		isEditableName: true,
-		rules: [
-			'device_mgmt', 'device_mgmt:view', 'device_mgmt:restart_shutdown',
-			'software_deploy', 'software_deploy:view', 'software_deploy:install',
-			'user_mgmt', 'user_mgmt:view',
-		],
-		desc: 'Customizable tenant role 1',
-	},
-	{
-		id: 'role_2',
-		name: 'Role 2',
-		isEditableName: true,
-		rules: [
-			'usb_url_rules', 'usb_url_rules:usb_blocking', 'usb_url_rules:website_blocking',
-			'audit_geo', 'audit_geo:view_logs', 'audit_geo:live_map',
-			'reports_export', 'reports_export:view_analytics',
-		],
-		desc: 'Customizable tenant role 2',
-	},
-	{
-		id: 'role_3',
-		name: 'Role 3',
-		isEditableName: true,
-		rules: [
-			'device_mgmt', 'device_mgmt:view',
-			'software_deploy', 'software_deploy:view',
-		],
-		desc: 'Customizable tenant role 3',
-	},
-];
-
-const AVAILABLE_RULES = [
-	{
-		id: 'device_mgmt',
-		label: 'Device Management & Fleet Control',
-		desc: 'View, monitor, and issue commands to connected devices',
-		subRules: [
-			{ id: 'device_mgmt:view', label: 'View Telemetry & Fleet Status', desc: 'Monitor live device heartbeats and system specs' },
-			{ id: 'device_mgmt:remote_lock', label: 'Remote Lock & Wipe Commands', desc: 'Execute emergency device lock and security wipe' },
-			{ id: 'device_mgmt:restart_shutdown', label: 'Power Control (Reboot/Shutdown)', desc: 'Send remote reboot and shutdown commands' },
-			{ id: 'device_mgmt:gating', label: 'Store Gating Controls', desc: 'Enable or disable Windows Store gating policy' },
-		],
-	},
-	{
-		id: 'software_deploy',
-		label: 'Software Deployment & Package Installs',
-		desc: 'Push silently installed software packages to endpoints',
-		subRules: [
-			{ id: 'software_deploy:view', label: 'View Installed Applications', desc: 'Inspect software inventory across all devices' },
-			{ id: 'software_deploy:install', label: 'Push App Package Installs', desc: 'Trigger remote silent software installations' },
-			{ id: 'software_deploy:uninstall', label: 'Queue Remote App Uninstallation', desc: 'Uninstall unwanted software packages' },
-			{ id: 'software_deploy:upload', label: 'Upload Installer Packages', desc: 'Upload new .exe or .msi installer files' },
-		],
-	},
-	{
-		id: 'usb_url_rules',
-		label: 'USB & Website Security Rules',
-		desc: 'Configure USB storage blocking and URL web filters',
-		subRules: [
-			{ id: 'usb_url_rules:usb_blocking', label: 'USB Storage Device Blocking Option', desc: 'Configure USB storage read/write blocking & mass storage lock' },
-			{ id: 'usb_url_rules:website_blocking', label: 'Website & URL Filtering Option', desc: 'Block domain categories, custom URL blacklists & web filters' },
-		],
-	},
-	{
-		id: 'user_mgmt',
-		label: 'User Account Management',
-		desc: 'Create, edit, and revoke dashboard & device user accounts',
-		subRules: [
-			{ id: 'user_mgmt:view', label: 'View Registered Accounts', desc: 'Browse employee list and assigned devices' },
-			{ id: 'user_mgmt:create', label: 'Register New EMS Users', desc: 'Create dashboard and device user accounts' },
-			{ id: 'user_mgmt:edit', label: 'Edit Credentials & Roles', desc: 'Modify employee codes, email addresses, and roles' },
-			{ id: 'user_mgmt:delete', label: 'Delete User Accounts', desc: 'Permanently remove user credentials from workspace' },
-		],
-	},
-	{
-		id: 'audit_geo',
-		label: 'Audit Logs & Device Geolocation',
-		desc: 'Access real-time authentication logs & GPS/IP location maps',
-		subRules: [
-			{ id: 'audit_geo:view_logs', label: 'View Real-time Audit Logs', desc: 'Stream security events and authentication attempts' },
-			{ id: 'audit_geo:live_map', label: 'Live Device Geolocation Map', desc: 'Track device IP/GPS location on interactive map' },
-			{ id: 'audit_geo:export_logs', label: 'Export Audit Logs', desc: 'Download security event history in CSV/JSON' },
-		],
-	},
-	{
-		id: 'reports_export',
-		label: 'Reports & Analytics Export',
-		desc: 'Generate system PDF/CSV performance and compliance reports',
-		subRules: [
-			{ id: 'reports_export:view_analytics', label: 'View Performance Matrix', desc: 'Analyze OS distribution and antivirus status' },
-			{ id: 'reports_export:download_pdf', label: 'Download PDF Security Reports', desc: 'Generate printable official PDF compliance reports' },
-			{ id: 'reports_export:export_csv', label: 'Export Fleet Metrics to CSV', desc: 'Export raw device metrics and inventory data' },
-		],
-	},
-];
-
-function isCategoryEnabled(activeRules, catId) {
-	if (!activeRules) return false;
-	return activeRules.includes(catId) || activeRules.some((r) => r.startsWith(catId + ':'));
-}
-
-function getSubRuleCount(activeRules, catObj) {
-	if (!activeRules || !catObj || !catObj.subRules) return 0;
-	return catObj.subRules.filter((sr) =>
-		activeRules.includes(sr.id) || activeRules.includes(catObj.id)
-	).length;
-}
-
-function toggleCategoryRules(activeRules, catObj) {
-	const enabled = isCategoryEnabled(activeRules, catObj.id);
-	const subIds = catObj.subRules.map((sr) => sr.id);
-	if (enabled) {
-		return activeRules.filter((r) => r !== catObj.id && !subIds.includes(r));
-	} else {
-		return Array.from(new Set([...activeRules, catObj.id, ...subIds]));
-	}
-}
-
-function toggleSubRulePermission(activeRules, catObj, subRuleId) {
-	const subIds = catObj.subRules.map((sr) => sr.id);
-	let currentSubs = catObj.subRules
-		.filter((sr) => activeRules.includes(sr.id) || activeRules.includes(catObj.id))
-		.map((sr) => sr.id);
-
-	if (currentSubs.includes(subRuleId)) {
-		currentSubs = currentSubs.filter((id) => id !== subRuleId);
-	} else {
-		currentSubs = [...currentSubs, subRuleId];
-	}
-
-	const cleaned = activeRules.filter((r) => r !== catObj.id && !subIds.includes(r));
-	if (currentSubs.length > 0) {
-		return [...cleaned, catObj.id, ...currentSubs];
-	} else {
-		return cleaned;
-	}
-}
-
-function PermissionsCategoryList({ currentRules, onChangeRules }) {
-	return (
-		<div className="space-y-2.5 bg-slate-100/50 p-3 rounded-xl border border-border/60 max-h-[360px] overflow-y-auto">
-			{AVAILABLE_RULES.map((rule) => {
-				const catEnabled = isCategoryEnabled(currentRules, rule.id);
-				const activeSubCount = getSubRuleCount(currentRules, rule);
-				const totalSubCount = rule.subRules.length;
-
-				return (
-					<div
-						key={rule.id}
-						className={`rounded-xl border transition-all ${
-							catEnabled
-								? 'bg-background border-primary/40 shadow-2xs'
-								: 'bg-background/60 border-border/80 opacity-85'
-						}`}
-					>
-						<label className="flex items-start gap-2.5 p-3 cursor-pointer">
-							<input
-								type="checkbox"
-								checked={catEnabled}
-								onChange={() => {
-									const nextRules = toggleCategoryRules(currentRules, rule);
-									onChangeRules(nextRules);
-								}}
-								className="mt-0.5 rounded border-input text-primary focus:ring-accent accent-accent cursor-pointer"
-							/>
-							<div className="flex-1 min-w-0">
-								<div className="flex items-center justify-between gap-2">
-									<span className="font-bold text-xs text-primary">{rule.label}</span>
-									{catEnabled && (
-										<span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 shrink-0">
-											{activeSubCount}/{totalSubCount} sub-rules active
-										</span>
-									)}
-								</div>
-								<p className="text-[10px] text-muted-foreground mt-0.5">{rule.desc}</p>
-							</div>
-						</label>
-
-						{/* Sub Category Permissions Card */}
-						{catEnabled && rule.subRules && rule.subRules.length > 0 && (
-							<div className="px-3 pb-3 pt-2 border-t border-border/40 bg-slate-50/80 rounded-b-xl space-y-2 border-l-3 border-l-primary">
-								<span className="text-[10px] font-extrabold uppercase tracking-wider text-primary flex items-center gap-1 block">
-									<ShieldCheck size={12} className="text-primary" /> Sub Category Permissions ({rule.label})
-								</span>
-								<div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-									{rule.subRules.map((sub) => {
-										const isSubChecked =
-											currentRules.includes(sub.id) ||
-											(currentRules.includes(rule.id) &&
-												!currentRules.some((r) => r.startsWith(rule.id + ':')));
-										return (
-											<label
-												key={sub.id}
-												className={`flex items-start gap-2 p-2 rounded-lg border text-[11px] transition-all cursor-pointer ${
-													isSubChecked
-														? 'bg-primary/10 border-primary/30 text-primary font-semibold'
-														: 'bg-background border-border/60 text-muted-foreground hover:bg-slate-100'
-												}`}
-											>
-												<input
-													type="checkbox"
-													checked={isSubChecked}
-													onChange={() => {
-														const nextRules = toggleSubRulePermission(currentRules, rule, sub.id);
-														onChangeRules(nextRules);
-													}}
-													className="mt-0.5 rounded border-input text-primary focus:ring-accent accent-accent cursor-pointer"
-												/>
-												<div>
-													<span className="block font-bold text-xs leading-tight">{sub.label}</span>
-													<span className="text-[10px] opacity-75 font-normal block leading-tight mt-0.5">{sub.desc}</span>
-												</div>
-											</label>
-										);
-									})}
-								</div>
-							</div>
-						)}
-					</div>
-				);
-			})}
-		</div>
-	);
-}
 
 function mapUser(u) {
 	const initials = (u.username || u.name || u.email || '?').slice(0, 2);
@@ -270,8 +18,8 @@ function mapUser(u) {
 		name: u.username || u.name || 'App User',
 		email: u.email,
 		type: u.type || u.userType || 'Device User',
-		role: u.role || (u.type === 'Device User' ? 'Device User' : 'Super Admin'),
-		rules: u.rules || ['device_mgmt', 'software_deploy', 'usb_url_rules', 'user_mgmt', 'audit_geo', 'reports_export'],
+		role: u.role || 'Device User',
+		rules: u.rules || [],
 		registered: u.createdDate || u.registered,
 		deviceId: u.deviceId,
 		deviceName: u.deviceName,
@@ -281,7 +29,126 @@ function mapUser(u) {
 	};
 }
 
-export default function UsersPage({ onNavigateToDevice }) {
+function getDateKey(dateInput) {
+	if (!dateInput) return '';
+	try {
+		const d = new Date(dateInput);
+		if (isNaN(d.getTime())) return '';
+		const y = d.getFullYear();
+		const m = String(d.getMonth() + 1).padStart(2, '0');
+		const day = String(d.getDate()).padStart(2, '0');
+		return `${y}-${m}-${day}`;
+	} catch {
+		return '';
+	}
+}
+
+function formatLogTime(iso) {
+	if (!iso) return '—';
+	try {
+		const d = new Date(iso);
+		if (isNaN(d.getTime())) return String(iso);
+		return d.toLocaleTimeString(undefined, {
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit',
+			hour12: true,
+		});
+	} catch {
+		return String(iso);
+	}
+}
+
+function formatDateHeader(dateInput) {
+	if (!dateInput) return '';
+	const d = new Date(dateInput);
+	if (isNaN(d.getTime())) return String(dateInput);
+
+	const today = new Date();
+	const isToday = d.toDateString() === today.toDateString();
+
+	const yesterday = new Date();
+	yesterday.setDate(yesterday.getDate() - 1);
+	const isYesterday = d.toDateString() === yesterday.toDateString();
+
+	const dayNum = String(d.getDate()).padStart(2, '0');
+	const monthStr = d.toLocaleDateString('en-US', { month: 'short' });
+	const year = d.getFullYear();
+	const weekday = d.toLocaleDateString('en-US', { weekday: 'long' });
+
+	if (isToday) {
+		return `Today - ${dayNum} ${monthStr} ${year} (${weekday})`;
+	}
+	if (isYesterday) {
+		return `Yesterday - ${dayNum} ${monthStr} ${year} (${weekday})`;
+	}
+	return `${dayNum} ${monthStr} ${year} (${weekday})`;
+}
+
+function getLogActionMeta(type, detail) {
+	const t = (type || '').toLowerCase();
+	switch (t) {
+		case 'login':
+			return {
+				action: 'User Login',
+				icon: LogIn,
+				color: 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20',
+				dot: 'bg-emerald-500',
+				desc: detail ? `User signed in: ${detail}` : 'Employee signed in to endpoint session',
+			};
+		case 'lock':
+			return {
+				action: 'Screen Locked',
+				icon: Lock,
+				color: 'text-amber-600 bg-amber-500/10 border-amber-500/20',
+				dot: 'bg-amber-500',
+				desc: detail ? `Screen locked: ${detail}` : 'Inactivity timeout auto-lock / user screen locked',
+			};
+		case 'unlock':
+		case 'wake':
+			return {
+				action: 'Screen Unlocked',
+				icon: Unlock,
+				color: 'text-blue-600 bg-blue-500/10 border-blue-500/20',
+				dot: 'bg-blue-500',
+				desc: detail || 'Endpoint screen unlocked / session resumed',
+			};
+		case 'shutdown':
+			return {
+				action: 'Device Shutdown',
+				icon: Power,
+				color: 'text-rose-600 bg-rose-500/10 border-rose-500/20',
+				dot: 'bg-rose-500',
+				desc: detail ? `Session ended (gap: ${detail})` : 'Endpoint powered off / session terminated',
+			};
+		case 'alert':
+			return {
+				action: 'Manager Inactivity Alert',
+				icon: Bell,
+				color: 'text-rose-600 bg-rose-500/10 border-rose-500/20',
+				dot: 'bg-rose-500',
+				desc: detail ? `Manager notified: ${detail}` : 'Prolonged inactivity alert triggered to manager',
+			};
+		case 'account_created':
+			return {
+				action: 'Account Enrolled',
+				icon: UserPlus,
+				color: 'text-purple-600 bg-purple-500/10 border-purple-500/20',
+				dot: 'bg-purple-500',
+				desc: detail || 'EMS account created and enrolled into workspace',
+			};
+		default:
+			return {
+				action: (type || 'Activity').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+				icon: Activity,
+				color: 'text-primary bg-primary/10 border-primary/20',
+				dot: 'bg-primary',
+				desc: detail || 'Activity recorded on endpoint',
+			};
+	}
+}
+
+export default function UsersPage({ onNavigateToDevice, activeSubTab = 'users-logs' }) {
 	const [users, setUsers] = useState([]);
 	const [userLimit, setUserLimit] = useState(null);
 	const [newManagerId, setNewManagerId] = useState('');
@@ -289,39 +156,119 @@ export default function UsersPage({ onNavigateToDevice }) {
 	const [loading, setLoading] = useState(true);
 	const [loadError, setLoadError] = useState(null);
 	const [searchTerm, setSearchTerm] = useState('');
-	const [userTypeFilter, setUserTypeFilter] = useState('All');
 	const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
 
-	// Tenant Roles configuration state (5 roles: Super Admin, Admin, Role 1, Role 2, Role 3)
-	const [tenantRoles, setTenantRoles] = useState(() => {
-		try {
-			const saved = localStorage.getItem('ems_tenant_roles_v4');
-			return saved ? JSON.parse(saved) : DEFAULT_TENANT_ROLES;
-		} catch {
-			return DEFAULT_TENANT_ROLES;
+	// User Details & Logs modal state
+	const [inspectUser, setInspectUser] = useState(null);
+	const [userLogs, setUserLogs] = useState([]);
+	const [logsLoading, setLogsLoading] = useState(false);
+	const [openDateKeys, setOpenDateKeys] = useState(() => new Set([getDateKey(new Date())]));
+
+	// Group logs by YYYY-MM-DD
+	const logsByDate = useMemo(() => {
+		const map = {};
+		(userLogs || []).forEach((log) => {
+			const key = getDateKey(log.at);
+			if (!key) return;
+			if (!map[key]) map[key] = [];
+			map[key].push(log);
+		});
+		return map;
+	}, [userLogs]);
+
+	// Build past dates list: dates with logs only, sorted descending (newest date first)
+	const dateGroupsList = useMemo(() => {
+		const todayKey = getDateKey(new Date());
+		const dateKeysSet = new Set(Object.keys(logsByDate));
+
+		// If no logs exist yet, add todayKey as fallback
+		if (dateKeysSet.size === 0) {
+			dateKeysSet.add(todayKey);
 		}
-	});
 
+		// Sort descending (newest date first)
+		const sortedKeys = Array.from(dateKeysSet).sort((a, b) => b.localeCompare(a));
+
+		return sortedKeys.map((key) => {
+			const [y, m, d] = key.split('-').map(Number);
+			const dateObj = new Date(y, m - 1, d);
+			const logs = logsByDate[key] || [];
+			const isToday = key === todayKey;
+
+			return {
+				key,
+				dateObj,
+				label: formatDateHeader(dateObj),
+				logs,
+				count: logs.length,
+				isToday,
+			};
+		});
+	}, [logsByDate]);
+
+	// Fetch logs when inspectUser changes
 	useEffect(() => {
-		try {
-			localStorage.setItem('ems_tenant_roles_v4', JSON.stringify(tenantRoles));
-		} catch {}
-	}, [tenantRoles]);
+		if (!inspectUser) {
+			setUserLogs([]);
+			setOpenDateKeys(new Set());
+			return;
+		}
+		let mounted = true;
+		setLogsLoading(true);
+		fetchUserLogs(inspectUser.id, inspectUser.deviceId)
+			.then((logs) => {
+				if (!mounted) return;
+				const fetchedLogs = logs || [];
+				setUserLogs(fetchedLogs);
 
-	const [isRolesModalOpen, setIsRolesModalOpen] = useState(false);
-	const [editingRoleNameId, setEditingRoleNameId] = useState(null);
-	const [tempRoleName, setTempRoleName] = useState('');
+				const todayKey = getDateKey(new Date());
+				const hasToday = fetchedLogs.some((l) => getDateKey(l.at) === todayKey);
+				if (hasToday) {
+					setOpenDateKeys(new Set([todayKey]));
+				} else if (fetchedLogs.length > 0) {
+					// Default to newest date that has logs
+					const datesWithLogs = Array.from(
+						new Set(fetchedLogs.map((l) => getDateKey(l.at)).filter(Boolean))
+					).sort((a, b) => b.localeCompare(a));
+					setOpenDateKeys(new Set([datesWithLogs[0] || todayKey]));
+				} else {
+					setOpenDateKeys(new Set([todayKey]));
+				}
+			})
+			.catch(() => {
+				if (!mounted) return;
+				setUserLogs([]);
+			})
+			.finally(() => {
+				if (mounted) setLogsLoading(false);
+			});
+		return () => {
+			mounted = false;
+		};
+	}, [inspectUser]);
 
-	// Multi-step registration state
-	const [regStep, setRegStep] = useState(1);
+	const handleOpenUserDetails = (u) => {
+		setInspectUser(u);
+		setOpenDateKeys(new Set([getDateKey(new Date())])); // today date defaultly opened
+	};
+
+	const toggleDate = (key) => {
+		setOpenDateKeys((prev) => {
+			// If clicking the only open date, toggle it closed
+			if (prev.has(key) && prev.size === 1) {
+				return new Set();
+			}
+			// Hold this date open until another date expands
+			return new Set([key]);
+		});
+	};
+
+	// Registration state
 	const [newEmpCode, setNewEmpCode] = useState('');
 	const [newUsername, setNewUsername] = useState('');
 	const [newEmail, setNewEmail] = useState('');
 	const [newPassword, setNewPassword] = useState('');
 	const [newConfirmPassword, setNewConfirmPassword] = useState('');
-	const [newType, setNewType] = useState('Device User');
-	const [newRole, setNewRole] = useState('Super Admin');
-	const [newRules, setNewRules] = useState(tenantRoles[0]?.rules || []);
 	const [formError, setFormError] = useState('');
 	const [submitting, setSubmitting] = useState(false);
 
@@ -332,9 +279,6 @@ export default function UsersPage({ onNavigateToDevice }) {
 	const [editUsername, setEditUsername] = useState('');
 	const [editEmail, setEditEmail] = useState('');
 	const [editPassword, setEditPassword] = useState('');
-	const [editType, setEditType] = useState('Device User');
-	const [editRole, setEditRole] = useState('Super Admin');
-	const [editRules, setEditRules] = useState([]);
 	const [editError, setEditError] = useState('');
 	const [editSubmitting, setEditSubmitting] = useState(false);
 
@@ -367,11 +311,11 @@ export default function UsersPage({ onNavigateToDevice }) {
 	}, []);
 
 	useEffect(() => {
-		document.body.style.overflow = isRegisterModalOpen || isEditModalOpen || isDeleteModalOpen || isRolesModalOpen ? 'hidden' : '';
+		document.body.style.overflow = isRegisterModalOpen || isEditModalOpen || isDeleteModalOpen || inspectUser ? 'hidden' : '';
 		return () => {
 			document.body.style.overflow = '';
 		};
-	}, [isRegisterModalOpen, isEditModalOpen, isDeleteModalOpen, isRolesModalOpen]);
+	}, [isRegisterModalOpen, isEditModalOpen, isDeleteModalOpen, inspectUser]);
 
 	useEffect(() => {
 		if (successMsg) {
@@ -381,58 +325,18 @@ export default function UsersPage({ onNavigateToDevice }) {
 	}, [successMsg]);
 
 	const resetForm = () => {
-		setRegStep(1);
 		setNewEmpCode('');
 		setNewUsername('');
 		setNewEmail('');
 		setNewPassword('');
 		setNewConfirmPassword('');
-		setNewType('Device User');
 		setNewManagerId('');
-		setNewRole(tenantRoles[0]?.name || 'Super Admin');
-		setNewRules(tenantRoles[0]?.rules || []);
 		setFormError('');
 	};
 
-	const handleRenameRole = (roleId, newName) => {
-		const trimmed = newName.trim();
-		if (!trimmed) return;
-		setTenantRoles((prev) =>
-			prev.map((r) => {
-				if (r.id === roleId && r.isEditableName) {
-					if (newRole === r.name) setNewRole(trimmed);
-					if (editRole === r.name) setEditRole(trimmed);
-					return { ...r, name: trimmed };
-				}
-				return r;
-			})
-		);
-		setEditingRoleNameId(null);
-		setSuccessMsg(`Role renamed to "${trimmed}" successfully!`);
-	};
-
-	const handleSaveRoleDefaultRules = (roleId, rulesToSave) => {
-		setTenantRoles((prev) =>
-			prev.map((r) => (r.id === roleId ? { ...r, rules: [...rulesToSave] } : r))
-		);
-		setSuccessMsg('Updated default permissions for role!');
-	};
-
-	const toggleRule = (ruleId) => {
-		setNewRules((prev) =>
-			prev.includes(ruleId) ? prev.filter((r) => r !== ruleId) : [...prev, ruleId]
-		);
-	};
-
-	const toggleEditRule = (ruleId) => {
-		setEditRules((prev) =>
-			prev.includes(ruleId) ? prev.filter((r) => r !== ruleId) : [...prev, ruleId]
-		);
-	};
-
-	const handleNextStep = (e) => {
+	const handleRegisterUser = async (e) => {
 		if (e) e.preventDefault();
-		if (!newEmpCode.trim() || !newUsername.trim() || !newEmail.trim()) {
+		if (!newEmpCode.trim() || !newUsername.trim() || !newEmail.trim() || !newPassword) {
 			setFormError('Please fill in all required fields.');
 			return;
 		}
@@ -444,37 +348,25 @@ export default function UsersPage({ onNavigateToDevice }) {
 			setFormError('Passwords do not match.');
 			return;
 		}
-		setFormError('');
 
-		if (newType === 'Dashboard User') {
-			setRegStep(2);
-		} else {
-			handleRegisterUser();
-		}
-	};
-
-	const handleRegisterUser = async () => {
 		setSubmitting(true);
 		setFormError('');
 		try {
-			const matchedRoleObj = tenantRoles.find((r) => r.name === newRole || r.id === newRole);
-			const assignedRules = matchedRoleObj ? matchedRoleObj.rules : newRules;
-
 			const created = await createUser({
 				email: newEmail.trim(),
 				employeeCode: newEmpCode.trim(),
 				username: newUsername.trim(),
 				password: newPassword,
 				confirmPassword: newConfirmPassword,
-				type: newType,
-				role: newType === 'Dashboard User' ? newRole : 'Device User',
-				managerUserId: newType === 'Device User' && newManagerId ? Number(newManagerId) : null,
-				rules: newType === 'Dashboard User' ? assignedRules : [],
+				type: 'Device User',
+				role: 'Device User',
+				managerUserId: newManagerId ? Number(newManagerId) : null,
+				rules: [],
 			});
 			setUsers((us) => [mapUser(created), ...us]);
 			resetForm();
 			setIsRegisterModalOpen(false);
-			setSuccessMsg(`Registered ${newType === 'Dashboard User' ? `${newRole} account` : 'device user'} successfully!`);
+			setSuccessMsg(`Registered user "${newUsername.trim()}" successfully!`);
 		} catch (err) {
 			setFormError(err instanceof Error ? err.message : 'Failed to register user.');
 		} finally {
@@ -487,10 +379,7 @@ export default function UsersPage({ onNavigateToDevice }) {
 		setEditEmpCode(user.empCode === '—' ? '' : user.empCode);
 		setEditUsername(user.name);
 		setEditEmail(user.email);
-		setEditType(user.type || 'Dashboard User');
 		setEditManagerId(user.managerUserId ? String(user.managerUserId) : '');
-		setEditRole(user.role || 'Tenant Admin');
-		setEditRules(user.rules || ['device_mgmt', 'software_deploy', 'usb_url_rules', 'user_mgmt', 'audit_geo', 'reports_export']);
 		setEditPassword('');
 		setEditError('');
 		setIsEditModalOpen(true);
@@ -510,20 +399,21 @@ export default function UsersPage({ onNavigateToDevice }) {
 				email: editEmail.trim(),
 				employeeCode: editEmpCode.trim(),
 				username: editUsername.trim(),
-				password: editPassword,
-				type: editType,
-				role: editType === 'Dashboard User' ? editRole : 'Device User',
-				managerUserId: editType === 'Device User' && editManagerId ? Number(editManagerId) : null,
-				rules: editType === 'Dashboard User' ? editRules : [],
+				name: editUsername.trim(),
+				type: 'Device User',
+				role: 'Device User',
+				managerUserId: editManagerId ? Number(editManagerId) : null,
+				rules: [],
+				...(editPassword ? { password: editPassword } : {}),
 			});
 			setUsers((us) =>
 				us.map((u) => (u.id === editingUser.id ? mapUser({ ...u, ...updated }) : u))
 			);
 			setIsEditModalOpen(false);
 			setEditingUser(null);
-			setSuccessMsg('User details saved successfully!');
+			setSuccessMsg('User account updated successfully.');
 		} catch (err) {
-			setEditError(err instanceof Error ? err.message : 'Failed to update user.');
+			setEditError(err instanceof Error ? err.message : 'Update failed.');
 		} finally {
 			setEditSubmitting(false);
 		}
@@ -556,11 +446,12 @@ export default function UsersPage({ onNavigateToDevice }) {
 
 	const filteredUsers = users.filter((u) => {
 		const term = searchTerm.toLowerCase();
-		const matchesSearch =
+		return (
 			!term ||
-			[u.name, u.email, u.empCode, u.type, u.role, u.deviceId, u.deviceName].filter(Boolean).some((v) => v.toLowerCase().includes(term));
-		const matchesType = userTypeFilter === 'All' || !userTypeFilter || u.type === userTypeFilter;
-		return matchesSearch && matchesType;
+			[u.name, u.email, u.empCode, u.deviceId, u.deviceName]
+				.filter(Boolean)
+				.some((v) => v.toLowerCase().includes(term))
+		);
 	});
 
 	const totalCount = users.length;
@@ -589,12 +480,40 @@ export default function UsersPage({ onNavigateToDevice }) {
 				</div>
 			)}
 
-			{/* Summary KPI Cards */}
+			{/* Top User Summary Cards */}
 			<section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-				<UserSummary title="Total Users" value={totalCount} icon={Users} tone="bg-primary/10 text-primary" badge="Workspace wide" />
-				<UserSummary title="New Today" value={newToday} icon={UserPlus} tone="bg-accent/10 text-accent" badge="Last 24h" />
-				<UserSummary title="New This Week" value={newWeek} icon={TrendingUp} tone="bg-emerald-500/10 text-emerald-600" badge="Last 7 days" />
-				<UserSummary title="Enrolled" value={totalCount} icon={BadgeCheck} tone="bg-primary/10 text-primary" badge="EMS accounts" />
+				<UserSummary
+					title="Total Users"
+					value={totalCount}
+					icon={Users}
+					tone="primary"
+					badge={`${users.filter((u) => u.deviceId).length} connected`}
+					sub="Fleet wide"
+				/>
+				<UserSummary
+					title="Connected"
+					value={users.filter((u) => u.deviceId).length}
+					icon={Laptop}
+					tone="secondary"
+					badge={totalCount ? `${Math.round((users.filter((u) => u.deviceId).length / (totalCount || 1)) * 100)}% active` : '0%'}
+					sub="Paired devices"
+				/>
+				<UserSummary
+					title="New Today"
+					value={newToday}
+					icon={UserPlus}
+					tone="tertiary"
+					badge={newToday > 0 ? `+${newToday} joined` : 'No new'}
+					sub="Last 24 hours"
+				/>
+				<UserSummary
+					title="New This Week"
+					value={newWeek}
+					icon={TrendingUp}
+					tone="primary"
+					badge={newWeek > 0 ? `+${newWeek} enrolled` : '0 enrolled'}
+					sub="Last 7 days"
+				/>
 			</section>
 
 			{/* Table Card */}
@@ -602,17 +521,19 @@ export default function UsersPage({ onNavigateToDevice }) {
 				<div className="p-6 border-b border-border/60 space-y-4">
 					<div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
 						<div>
-							<h2 className="text-xl font-extrabold text-primary tracking-tight inline-flex items-center gap-2.5">User Management
-									{userLimit != null && (
-										<span className={`px-2.5 py-0.5 text-[11px] font-bold rounded-full border ${users.length >= userLimit ? 'bg-rose-500/10 text-rose-600 border-rose-500/20' : 'bg-primary/10 text-primary border-primary/20'}`}>{users.length} / {userLimit} users</span>
-									)}
-								</h2>
-							<p className="text-xs text-muted-foreground mt-0.5">Manage EMS accounts that activate and manage the fleet</p>
+							<h2 className="text-xl font-extrabold text-primary tracking-tight inline-flex items-center gap-2.5">
+								{activeSubTab === 'users-logs' || activeSubTab === 'logs' ? 'User Activity & Audit Logs' : 'User Management'}
+								{userLimit != null && (
+									<span className={`px-2.5 py-0.5 text-[11px] font-bold rounded-full border ${users.length >= userLimit ? 'bg-rose-500/10 text-rose-600 border-rose-500/20' : 'bg-primary/10 text-primary border-primary/20'}`}>{users.length} / {userLimit} users</span>
+								)}
+							</h2>
+							<p className="text-xs text-muted-foreground mt-0.5">
+								{activeSubTab === 'users-logs' || activeSubTab === 'logs'
+									? 'Click any user row to view their daily session & activity logs'
+									: 'Manage EMS accounts that activate and manage the fleet'}
+							</p>
 						</div>
 						<div className="flex items-center gap-2.5">
-							<button onClick={() => setIsRolesModalOpen(true)} className="px-3.5 py-2.5 bg-background border border-border/80 text-primary hover:bg-slate-100 rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all cursor-pointer">
-								<ShieldCheck size={16} /> Roles & Rules
-							</button>
 							<button
 								onClick={() => setIsRegisterModalOpen(true)}
 								disabled={userLimit != null && users.length >= userLimit}
@@ -624,21 +545,10 @@ export default function UsersPage({ onNavigateToDevice }) {
 						</div>
 					</div>
 
-					<div className="flex flex-col sm:flex-row items-center justify-between gap-3 w-full">
+					<div className="flex items-center justify-between gap-3 w-full">
 						<div className="relative flex-1 w-full">
 							<Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={16} />
-							<input type="text" placeholder="Search name, email, type, emp code..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-background border border-input rounded-xl pl-9 pr-4 py-2 text-xs font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all h-[38px]" />
-						</div>
-						<div className="w-full sm:w-52 shrink-0">
-							<CustomSelect
-								value={userTypeFilter}
-								onChange={setUserTypeFilter}
-								options={[
-									{ value: 'All', label: 'All User Types' },
-									{ value: 'Dashboard User', label: 'Dashboard User' },
-									{ value: 'Device User', label: 'Device User' },
-								]}
-							/>
+							<input type="text" placeholder="Search name, email, employee code, device..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-background border border-input rounded-xl pl-9 pr-4 py-2 text-xs font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all h-[38px]" />
 						</div>
 					</div>
 				</div>
@@ -649,13 +559,11 @@ export default function UsersPage({ onNavigateToDevice }) {
 							<tr>
 								<th className="px-6 py-3.5 w-12 text-center">#</th>
 								<th className="px-6 py-3.5 w-[18%]">User</th>
-								<th className="px-6 py-3.5 w-[12%]">Emp Code</th>
-								<th className="px-6 py-3.5 w-[14%]">User Type</th>
 								<th className="px-6 py-3.5 w-[22%]">Email</th>
 								<th className="px-6 py-3.5 w-[13%]">Device Name</th>
 								<th className="px-6 py-3.5 w-[11%] text-center">Status</th>
 								<th className="px-6 py-3.5 w-[10%]">Registered</th>
-								<th className="px-6 py-3.5 text-right w-20">Actions</th>
+								<th className="px-6 py-3.5 text-right w-24">Actions</th>
 							</tr>
 						</thead>
 						<tbody className="divide-y divide-border/40 text-xs">
@@ -663,26 +571,22 @@ export default function UsersPage({ onNavigateToDevice }) {
 								<tr><td colSpan={9} className="py-12 text-center text-muted-foreground">Loading users…</td></tr>
 							) : filteredUsers.length > 0 ? (
 								filteredUsers.map((u, index) => (
-									<tr key={u.id} className="hover:bg-slate-100/80 transition-colors">
+									<tr
+										key={u.id}
+										onClick={() => handleOpenUserDetails(u)}
+										className="hover:bg-slate-100/80 transition-colors cursor-pointer group select-none"
+										title="Click to view user details and activity logs"
+									>
 										<td className="px-6 py-4 text-center font-bold text-muted-foreground/80 font-mono text-[11px]">
 											{index + 1}
 										</td>
 										<td className="px-6 py-4">
 											<div className="flex items-center gap-3">
-												<div><span className="font-bold text-primary block">{u.name}</span>{u.type === 'Device User' && u.managerName && (<span className="block text-[10px] text-muted-foreground font-medium mt-0.5">Manager: {u.managerName}</span>)}</div>
+												<div>
+													<span className="font-bold text-primary block group-hover:text-accent transition-colors">{u.name}</span>
+													<span className="text-muted-foreground text-[11px] block">{u.empCode}</span>
+												</div>
 											</div>
-										</td>
-										<td className="px-6 py-4">
-											<span className="inline-block px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold bg-slate-100 text-primary border border-border/60">{u.empCode}</span>
-										</td>
-										<td className="px-6 py-4">
-											<span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-												u.type === 'Device User'
-													? 'bg-amber-500/10 text-amber-600 border-amber-500/30'
-													: 'bg-primary/10 text-primary border-primary/20'
-											}`}>
-												{u.type || 'Dashboard User'}
-											</span>
 										</td>
 										<td className="px-6 py-4 text-muted-foreground font-medium">{u.email}</td>
 										<td className="px-6 py-4">
@@ -708,19 +612,12 @@ export default function UsersPage({ onNavigateToDevice }) {
 										<td className="px-6 py-4 text-muted-foreground font-semibold">{relativeTime(u.registered)}</td>
 										<td className="px-6 py-4 text-right">
 											<div className="flex items-center justify-end gap-1.5">
-												{u.deviceId && (
-													<button
-														type="button"
-														onClick={() => onNavigateToDevice && onNavigateToDevice(u.deviceId)}
-														title={`View connected device (${u.deviceName}) details`}
-														className="p-1.5 text-muted-foreground hover:text-accent hover:bg-accent/10 rounded-lg transition-colors cursor-pointer flex items-center justify-center"
-													>
-														<span className="material-symbols-outlined leading-none" style={{fontSize: '17px'}}>arrow_outward</span>
-													</button>
-												)}
 												<button
 													type="button"
-													onClick={() => handleOpenEditModal(u)}
+													onClick={(e) => {
+														e.stopPropagation();
+														handleOpenEditModal(u);
+													}}
 													title="Edit user"
 													className="p-1.5 text-muted-foreground hover:text-primary hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
 												>
@@ -728,7 +625,10 @@ export default function UsersPage({ onNavigateToDevice }) {
 												</button>
 												<button
 													type="button"
-													onClick={() => handleOpenDeleteModal(u)}
+													onClick={(e) => {
+														e.stopPropagation();
+														handleOpenDeleteModal(u);
+													}}
 													title="Delete user"
 													className="p-1.5 text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
 												>
@@ -751,6 +651,249 @@ export default function UsersPage({ onNavigateToDevice }) {
 				</div>
 			</div>
 
+			{/* User Details & Date-Wise Activity Logs Modal */}
+			{inspectUser && ReactDOM.createPortal(
+				<div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs">
+					<div className="w-full max-w-[80%] h-[calc(100vh-60px)] max-h-[880px] bg-background border border-border/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+						
+						{/* Top Header: User Identity */}
+						<div className="px-6 py-5 border-b border-border/60 flex items-center justify-between shrink-0 bg-background/95 backdrop-blur-md">
+							<div className="flex items-center gap-4">
+								<div className={`w-12 h-12 rounded-2xl ${inspectUser.avatarBg} text-white font-extrabold text-lg flex items-center justify-center shadow-md shrink-0`}>
+									{(inspectUser.name || inspectUser.username || '?').slice(0, 2).toUpperCase()}
+								</div>
+								<div>
+									<div className="flex items-center gap-2.5 flex-wrap">
+										<h3 className="text-lg font-extrabold text-primary tracking-tight">{inspectUser.name}</h3>
+										<span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-slate-100 text-primary border border-border/60">
+											{inspectUser.empCode}
+										</span>
+										{inspectUser.deviceId ? (
+											<span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/30">
+												<span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Connected: {inspectUser.deviceName || 'Device'}
+											</span>
+										) : (
+											<span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-500 border border-slate-300">
+												<span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>No Connected Device
+											</span>
+										)}
+									</div>
+									<p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2">
+										<span>{inspectUser.email}</span>
+										{inspectUser.registered && <span>• Enrolled {relativeTime(inspectUser.registered)}</span>}
+									</p>
+								</div>
+							</div>
+
+							<div className="flex items-center gap-2">
+								{inspectUser.deviceId && onNavigateToDevice && (
+									<button
+										type="button"
+										onClick={() => {
+											const dId = inspectUser.deviceId;
+											setInspectUser(null);
+											onNavigateToDevice(dId);
+										}}
+										className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-accent/10 hover:bg-accent/20 text-accent font-bold text-xs rounded-xl transition-all cursor-pointer mr-2"
+										title="View assigned device details"
+									>
+										<Laptop size={14} />
+										<span>Device</span>
+									</button>
+								)}
+								<button
+									type="button"
+									onClick={() => setInspectUser(null)}
+									className="w-9 h-9 rounded-full text-muted-foreground hover:text-primary hover:bg-slate-100 flex items-center justify-center transition-colors cursor-pointer"
+								>
+									<X size={20} />
+								</button>
+							</div>
+						</div>
+
+						{/* Sub-Header Toolbar: Summary & Expand/Collapse Controls */}
+						<div className="px-6 py-3.5 bg-slate-50/90 border-b border-border/60 flex items-center justify-between gap-4 shrink-0">
+							<div className="flex items-center gap-3">
+								<div className="flex items-center gap-2 px-3 py-1.5 bg-background border border-border/60 rounded-xl text-xs shadow-2xs">
+									<Activity size={14} className="text-primary" />
+									<span className="text-muted-foreground font-medium">Total Activity:</span>
+									<span className="font-extrabold text-primary font-mono">{userLogs.length} events</span>
+								</div>
+								<span className="text-xs text-muted-foreground hidden sm:inline">
+									Click any date header to open that date's user logs
+								</span>
+							</div>
+
+							<div className="flex items-center gap-2">
+								<button
+									type="button"
+									onClick={() => setOpenDateKeys(new Set(dateGroupsList.map((g) => g.key)))}
+									className="px-3 py-1.5 bg-background border border-border/80 hover:border-primary/40 text-primary font-bold text-xs rounded-xl hover:bg-slate-100 transition-all cursor-pointer shadow-2xs"
+								>
+									Expand All
+								</button>
+								<button
+									type="button"
+									onClick={() => setOpenDateKeys(new Set())}
+									className="px-3 py-1.5 bg-background border border-border/80 hover:border-primary/40 text-muted-foreground hover:text-primary font-bold text-xs rounded-xl hover:bg-slate-100 transition-all cursor-pointer shadow-2xs"
+								>
+									Collapse All
+								</button>
+							</div>
+						</div>
+
+						{/* Main Content Body: Date Header Accordions (pt-0 so held date header sticks with 0 gap) */}
+						<div className="flex-1 overflow-y-auto px-6 pb-6 pt-0 space-y-3">
+							{logsLoading ? (
+								<div className="py-20 text-center space-y-3">
+									<div className="w-9 h-9 border-3 border-primary/20 border-t-primary rounded-full animate-spin mx-auto"></div>
+									<p className="text-xs font-semibold text-muted-foreground">Loading activity logs for {inspectUser.name}…</p>
+								</div>
+							) : userLogs.length === 0 ? (
+								<div className="py-20 text-center space-y-3 max-w-md mx-auto">
+									<div className="w-12 h-12 rounded-2xl bg-slate-100 text-muted-foreground flex items-center justify-center mx-auto">
+										<Calendar size={24} />
+									</div>
+									<h4 className="text-sm font-bold text-primary">No activity logs recorded</h4>
+									<p className="text-xs text-muted-foreground">
+										There are no recorded endpoint sessions or activity logs for {inspectUser.name}.
+									</p>
+								</div>
+							) : (
+								<div className="space-y-3 pt-3">
+									{dateGroupsList.map((group) => {
+										const isOpen = openDateKeys.has(group.key);
+										return (
+											<div
+												key={group.key}
+												className={`rounded-2xl border transition-all ${
+													isOpen
+														? 'bg-background border-primary/40 shadow-xs'
+														: 'bg-background/80 border-border/70 hover:border-primary/30 hover:bg-slate-50/60'
+												}`}
+											>
+												{/* Date Header: Click to Open Logs for this Date (Sticky when scrolling logs) */}
+												<button
+													type="button"
+													onClick={() => toggleDate(group.key)}
+													className={`w-full px-5 py-2.5 flex items-center justify-between text-left transition-colors cursor-pointer select-none sticky top-0 z-20 ${
+														isOpen
+															? 'bg-slate-100/95 backdrop-blur-md border-b border-border/60 rounded-t-2xl shadow-xs'
+															: 'bg-slate-50/70 hover:bg-slate-100/80 rounded-2xl'
+													}`}
+												>
+													<div className="flex items-center gap-3">
+														<div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+															group.isToday
+																? 'bg-accent/15 text-accent font-bold'
+																: group.count > 0
+																? 'bg-primary/10 text-primary'
+																: 'bg-slate-200/60 text-muted-foreground'
+														}`}>
+															<Calendar size={15} />
+														</div>
+														<div>
+															<span className="font-semibold text-xs text-primary block leading-tight">
+																{group.label}
+															</span>
+														</div>
+													</div>
+
+													<div className="flex items-center gap-3">
+														{group.count > 0 ? (
+															<span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/30">
+																{group.count} {group.count === 1 ? 'event' : 'events'}
+															</span>
+														) : (
+															<span className="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-muted-foreground border border-border/60">
+																No activity
+															</span>
+														)}
+														<ChevronDown
+															size={16}
+															className={`text-muted-foreground transition-transform duration-200 ${isOpen ? 'rotate-180 text-primary' : ''}`}
+														/>
+													</div>
+												</button>
+
+												{/* When Date Header is Opened: Show time | action | detail | timestamp */}
+												{isOpen && (
+													<div className="p-0 animate-in fade-in slide-in-from-top-1 duration-150">
+														{group.count === 0 ? (
+															<div className="py-8 text-center text-xs text-muted-foreground">
+																No user activity recorded on this date.
+															</div>
+														) : (
+															<div className="overflow-x-auto rounded-b-2xl">
+																<table className="w-full text-left border-collapse">
+																	<thead className="border-b border-border/60 text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground bg-slate-100/60">
+																		<tr>
+																			<th className="px-5 py-3 w-[18%] font-bold">Time</th>
+																			<th className="px-5 py-3 w-[22%] font-bold">Action</th>
+																			<th className="px-5 py-3 w-[42%] font-bold">Detail</th>
+																			<th className="px-5 py-3 text-right w-[18%] font-bold">Timestamp</th>
+																		</tr>
+																	</thead>
+																	<tbody className="divide-y divide-border/40 text-xs">
+																		{group.logs.map((log, idx) => {
+																			const meta = getLogActionMeta(log.type, log.detail);
+																			const Icon = meta.icon;
+																			return (
+																				<tr key={idx} className="hover:bg-slate-100/50 transition-colors">
+																					<td className="px-5 py-3">
+																						<div className="flex items-center gap-2">
+																							<Clock size={13} className="text-muted-foreground shrink-0" />
+																							<span className="font-bold text-primary font-mono text-xs">
+																								{formatLogTime(log.at)}
+																							</span>
+																						</div>
+																					</td>
+																					<td className="px-5 py-3">
+																						<span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${meta.color}`}>
+																							<Icon size={12} className="shrink-0" />
+																							<span>{meta.action}</span>
+																						</span>
+																					</td>
+																					<td className="px-5 py-3 text-muted-foreground font-medium text-xs">
+																						{meta.desc}
+																					</td>
+																					<td className="px-5 py-3 text-right font-mono text-[11px] text-muted-foreground">
+																						{relativeTime(log.at)}
+																					</td>
+																				</tr>
+																			);
+																		})}
+																	</tbody>
+																</table>
+															</div>
+														)}
+													</div>
+												)}
+											</div>
+										);
+									})}
+								</div>
+							)}
+						</div>
+
+						{/* Modal Footer */}
+						<div className="px-6 py-3.5 bg-slate-50/80 border-t border-border/60 flex items-center justify-between text-xs text-muted-foreground shrink-0">
+							<div>
+								Showing logs across <span className="font-bold text-primary">{dateGroupsList.length}</span> dates ({userLogs.length} total events)
+							</div>
+							<button
+								type="button"
+								onClick={() => setInspectUser(null)}
+								className="px-4 py-2 bg-primary text-primary-foreground font-bold rounded-xl hover:bg-accent hover:text-accent-foreground transition-all cursor-pointer shadow-xs"
+							>
+								Close
+							</button>
+						</div>
+					</div>
+				</div>,
+				document.body
+			)}
+
 			{/* Register Modal */}
 			{isRegisterModalOpen && ReactDOM.createPortal(
 				<div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
@@ -758,17 +901,11 @@ export default function UsersPage({ onNavigateToDevice }) {
 						<div className="flex justify-between items-center border-b border-border/60 pb-4">
 							<div className="flex items-center gap-3">
 								<div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold">
-									{regStep === 1 ? <UserPlus size={20} /> : <ShieldCheck size={20} />}
+									<UserPlus size={20} />
 								</div>
 								<div>
-									<h3 className="text-base font-bold text-primary">
-										{regStep === 1 ? 'Register User' : 'Assign Tenant Role'}
-									</h3>
-									<p className="text-xs text-muted-foreground">
-										{regStep === 1
-											? 'Step 1 of 2: Basic Account Details'
-											: 'Step 2 of 2: Select Tenant Administrative Role'}
-									</p>
+									<h3 className="text-base font-bold text-primary">Register User</h3>
+									<p className="text-xs text-muted-foreground">Add a new endpoint device user to your tenant</p>
 								</div>
 							</div>
 							<button onClick={() => { setIsRegisterModalOpen(false); resetForm(); }} className="w-8 h-8 rounded-full text-muted-foreground hover:text-primary hover:bg-slate-100 cursor-pointer flex items-center justify-center">
@@ -776,199 +913,27 @@ export default function UsersPage({ onNavigateToDevice }) {
 							</button>
 						</div>
 
-						{/* Step indicator pills */}
-						{newType === 'Dashboard User' && (
-							<div className="flex items-center gap-2 bg-slate-100/80 p-1.5 rounded-xl border border-border/60 text-xs">
-								<button
-									type="button"
-									onClick={() => setRegStep(1)}
-									className={`flex-1 py-1.5 rounded-lg font-bold transition-all text-center ${
-										regStep === 1 ? 'bg-primary text-primary-foreground shadow-xs' : 'text-muted-foreground hover:text-primary'
-									}`}
-								>
-									1. Account Details
-								</button>
-								<button
-									type="button"
-									onClick={() => {
-										if (newUsername && newEmail && newPassword.length >= 8 && newPassword === newConfirmPassword) {
-											setFormError('');
-											setRegStep(2);
-										} else {
-											setFormError('Please fill in valid account details first.');
-										}
-									}}
-									className={`flex-1 py-1.5 rounded-lg font-bold transition-all text-center ${
-										regStep === 2 ? 'bg-primary text-primary-foreground shadow-xs' : 'text-muted-foreground hover:text-primary'
-									}`}
-								>
-									2. Select Role
+						<form onSubmit={handleRegisterUser} className="space-y-4 text-xs">
+							<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+								<FormField label="Employee Code" required mono value={newEmpCode} onChange={setNewEmpCode} placeholder="e.g. EMP1001" />
+								<FormField label="Username" required value={newUsername} onChange={setNewUsername} placeholder="e.g. john.doe" />
+							</div>
+							<FormField label="Email Address" required type="email" value={newEmail} onChange={setNewEmail} placeholder="e.g. john.doe@enterprise.com" />
+							<CustomSelect label="Assign Manager (optional)" value={newManagerId} onChange={setNewManagerId} options={managerOptions} description="The dashboard user emailed if this user's device stays idle." />
+							<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+								<FormField label="Password" required type="password" minLength={8} value={newPassword} onChange={(v) => { setNewPassword(v); if (formError) setFormError(''); }} placeholder="At least 8 characters" />
+								<FormField label="Confirm Password" required type="password" minLength={8} value={newConfirmPassword} onChange={(v) => { setNewConfirmPassword(v); if (formError) setFormError(''); }} placeholder="At least 8 characters" />
+							</div>
+							{formError && <p className="text-xs text-rose-500 font-semibold">{formError}</p>}
+
+							<div className="flex items-center justify-end gap-3 pt-3 border-t border-border/60">
+								<button type="button" onClick={() => { setIsRegisterModalOpen(false); resetForm(); }} className="px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-slate-100 rounded-xl cursor-pointer">Cancel</button>
+								<button type="submit" disabled={submitting} className="px-5 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-sm hover:bg-accent hover:text-accent-foreground cursor-pointer transition-all disabled:opacity-60 flex items-center gap-2">
+									{submitting && <div className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin"></div>}
+									<span>Register User</span>
 								</button>
 							</div>
-						)}
-
-						{regStep === 1 ? (
-							<form onSubmit={handleNextStep} className="space-y-4 text-xs">
-								<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-									<FormField label="Employee Code" required mono value={newEmpCode} onChange={setNewEmpCode} placeholder="e.g. EMP1001" />
-									<CustomSelect
-										label="User Type"
-										required
-										value={newType}
-										onChange={(val) => {
-											setNewType(val);
-											if (val === 'Device User') setRegStep(1);
-										}}
-										options={[
-											{ value: 'Device User', label: 'Device User' },
-											{ value: 'Dashboard User', label: 'Dashboard User' },
-										]}
-									/>
-								</div>
-								<p className="text-[11px] text-muted-foreground -mt-2">
-									{newType === 'Dashboard User'
-										? 'Dashboard users have portal access with assigned roles & permission rules.'
-										: 'Device users are assigned directly to endpoints without administrative portal access.'}
-								</p>
-								<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-									<div className={newType === 'Device User' ? '' : 'sm:col-span-2'}>
-										<FormField label="Username" required value={newUsername} onChange={setNewUsername} placeholder="e.g. john.doe" />
-									</div>
-									{newType === 'Device User' && (
-										<CustomSelect label="Assign Manager (optional)" value={newManagerId} onChange={setNewManagerId} options={managerOptions} />
-									)}
-								</div>
-								<FormField label="Email Address" required type="email" value={newEmail} onChange={setNewEmail} placeholder="e.g. john.doe@enterprise.com" />
-								<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-									<FormField label="Password" required type="password" minLength={8} value={newPassword} onChange={(v) => { setNewPassword(v); if (formError) setFormError(''); }} placeholder="At least 8 characters" />
-									<FormField label="Confirm Password" required type="password" minLength={8} value={newConfirmPassword} onChange={(v) => { setNewConfirmPassword(v); if (formError) setFormError(''); }} placeholder="At least 8 characters" />
-								</div>
-								{formError && <p className="text-xs text-rose-500 font-semibold">{formError}</p>}
-
-								<div className="flex items-center justify-end gap-3 pt-3 border-t border-border/60">
-									<button type="button" onClick={() => { setIsRegisterModalOpen(false); resetForm(); }} className="px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-slate-100 rounded-xl cursor-pointer">Cancel</button>
-									<button type="submit" className="px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-sm hover:bg-accent hover:text-accent-foreground cursor-pointer transition-all">
-										{newType === 'Dashboard User' ? 'Next: Select Role' : 'Register User'}
-									</button>
-								</div>
-							</form>
-						) : (
-							<div className="space-y-4 text-xs">
-								<div>
-									<div className="flex items-center justify-between mb-2">
-										<label className="text-xs font-bold text-primary block">
-											Select Tenant Role <span className="text-rose-500">*</span>
-										</label>
-										<span className="text-[10px] text-muted-foreground">
-											Super Admin & Admin fixed; Role 1-3 editable
-										</span>
-									</div>
-									<div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-										{tenantRoles.map((role) => {
-											const isSelected = newRole === role.name || newRole === role.id;
-											const isEditingThisName = editingRoleNameId === role.id;
-
-											return (
-												<div
-													key={role.id}
-													onClick={() => {
-														setNewRole(role.name);
-														setNewRules([...role.rules]);
-													}}
-													className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative ${
-														isSelected
-															? 'bg-primary/10 border-primary text-primary font-bold shadow-xs'
-															: 'bg-background border-border/80 text-muted-foreground hover:border-primary/50'
-													}`}
-												>
-													<div className="flex items-center justify-between gap-2 mb-1">
-														{isEditingThisName ? (
-															<div className="flex items-center gap-1 w-full" onClick={(e) => e.stopPropagation()}>
-																<input
-																	type="text"
-																	value={tempRoleName}
-																	onChange={(e) => setTempRoleName(e.target.value)}
-																	onKeyDown={(e) => {
-																		if (e.key === 'Enter') handleRenameRole(role.id, tempRoleName);
-																	}}
-																	autoFocus
-																	className="w-full bg-background border border-primary rounded-lg px-2 py-0.5 text-xs font-bold text-primary focus:outline-none"
-																/>
-																<button
-																	type="button"
-																	onClick={() => handleRenameRole(role.id, tempRoleName)}
-																	className="bg-primary text-primary-foreground font-bold px-2 py-0.5 text-[10px] rounded-md shrink-0 cursor-pointer"
-																>
-																	Save
-																</button>
-															</div>
-														) : (
-															<>
-																<span className="font-bold text-xs flex items-center gap-1.5 truncate">
-																	{role.name}
-																	{!role.isEditableName ? (
-																		<span title="Locked role name (Super Admin / Admin)" className="text-muted-foreground/70">
-																			<Lock size={11} />
-																		</span>
-																	) : (
-																		<button
-																			type="button"
-																			onClick={(e) => {
-																				e.stopPropagation();
-																				setEditingRoleNameId(role.id);
-																				setTempRoleName(role.name);
-																			}}
-																			title="Rename role"
-																			className="p-1 rounded hover:bg-slate-200 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
-																		>
-																			<Pencil size={11} />
-																		</button>
-																	)}
-																</span>
-																{isSelected && <CheckCircle2 size={14} className="text-primary shrink-0" />}
-															</>
-														)}
-													</div>
-													<span className="text-[10px] opacity-75 font-normal block truncate">
-														{role.desc}
-													</span>
-												</div>
-											);
-										})}
-									</div>
-								</div>
-
-								<div className="bg-slate-100/70 border border-border/80 rounded-xl p-3.5 space-y-1.5 text-[11px]">
-									<div className="flex items-center gap-2 font-extrabold text-primary">
-										<ShieldCheck size={16} className="text-primary" />
-										<span>Permissions Inherited from Role</span>
-									</div>
-									<p className="text-muted-foreground leading-relaxed">
-										This account will automatically inherit all permissions and sub-category security rules assigned to <span className="font-bold text-primary">{newRole}</span>. You can manage or customize role permissions anytime in <span className="font-semibold text-primary">Roles & Rules</span> settings.
-									</p>
-								</div>
-
-								{formError && <p className="text-xs text-rose-500 font-semibold">{formError}</p>}
-
-								<div className="flex items-center justify-between gap-3 pt-3 border-t border-border/60">
-									<button
-										type="button"
-										onClick={() => setRegStep(1)}
-										className="px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-slate-100 rounded-xl cursor-pointer"
-									>
-										Back to Account Info
-									</button>
-									<button
-										type="button"
-										disabled={submitting}
-										onClick={handleRegisterUser}
-										className="px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-sm hover:bg-accent hover:text-accent-foreground cursor-pointer transition-all disabled:opacity-60"
-									>
-										{submitting ? 'Creating Account…' : 'Complete Registration'}
-									</button>
-								</div>
-							</div>
-						)}
+						</form>
 					</div>
 				</div>,
 				document.body
@@ -996,126 +961,18 @@ export default function UsersPage({ onNavigateToDevice }) {
 						<form onSubmit={handleUpdateUser} className="space-y-4 text-xs">
 							<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 								<FormField label="Employee Code" required mono value={editEmpCode} onChange={setEditEmpCode} placeholder="e.g. EMP1001" />
-								<CustomSelect
-									label="User Type"
-									required
-									value={editType}
-									onChange={setEditType}
-									options={[
-										{ value: 'Device User', label: 'Device User' },
-										{ value: 'Dashboard User', label: 'Dashboard User' },
-									]}
-								/>
+								<FormField label="Username" required value={editUsername} onChange={setEditUsername} placeholder="e.g. john.doe" />
 							</div>
-							<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-								<div className={editType === 'Device User' ? '' : 'sm:col-span-2'}>
-									<FormField label="Username" required value={editUsername} onChange={setEditUsername} placeholder="e.g. john.doe" />
-								</div>
-								{editType === 'Device User' && (
-									<CustomSelect label="Assign Manager (optional)" value={editManagerId} onChange={setEditManagerId} options={managerOptions} description="The dashboard user emailed if this user's device stays idle." />
-								)}
-							</div>
-
-							{editType === 'Dashboard User' && (
-								<>
-									<div>
-										<div className="flex items-center justify-between mb-2">
-											<label className="text-xs font-bold text-primary block">
-												Tenant Role <span className="text-rose-500">*</span>
-											</label>
-											<span className="text-[10px] text-muted-foreground">
-												Role 1-3 names editable
-											</span>
-										</div>
-										<div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-											{tenantRoles.map((role) => {
-												const isSelected = editRole === role.name || editRole === role.id;
-												const isEditingThisName = editingRoleNameId === role.id;
-
-												return (
-													<div
-														key={role.id}
-														onClick={() => {
-															setEditRole(role.name);
-															setEditRules([...role.rules]);
-														}}
-														className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer relative ${
-															isSelected
-																? 'bg-accent/15 border-accent text-accent-foreground font-bold shadow-xs'
-																: 'bg-background border-border/80 text-muted-foreground hover:border-accent/50'
-														}`}
-													>
-														<div className="flex items-center justify-between gap-2">
-															{isEditingThisName ? (
-																<div className="flex items-center gap-1 w-full" onClick={(e) => e.stopPropagation()}>
-																	<input
-																		type="text"
-																		value={tempRoleName}
-																		onChange={(e) => setTempRoleName(e.target.value)}
-																		onKeyDown={(e) => {
-																			if (e.key === 'Enter') handleRenameRole(role.id, tempRoleName);
-																		}}
-																		autoFocus
-																		className="w-full bg-background border border-accent rounded-lg px-2 py-0.5 text-xs font-bold text-primary focus:outline-none"
-																	/>
-																	<button
-																		type="button"
-																		onClick={() => handleRenameRole(role.id, tempRoleName)}
-																		className="bg-accent text-accent-foreground font-bold px-2 py-0.5 text-[10px] rounded-md shrink-0 cursor-pointer"
-																	>
-																		Save
-																	</button>
-																</div>
-															) : (
-																<>
-																	<span className="font-bold text-xs flex items-center gap-1.5 truncate">
-																		{role.name}
-																		{!role.isEditableName ? (
-																			<span title="Locked role name (Super Admin / Admin)" className="text-muted-foreground/70">
-																				<Lock size={11} />
-																			</span>
-																		) : (
-																			<button
-																				type="button"
-																				onClick={(e) => {
-																					e.stopPropagation();
-																					setEditingRoleNameId(role.id);
-																					setTempRoleName(role.name);
-																				}}
-																				title="Edit role name"
-																				className="p-1 rounded hover:bg-slate-200 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
-																			>
-																				<Pencil size={11} />
-																			</button>
-																		)}
-																	</span>
-																	{isSelected && <CheckCircle2 size={14} className="text-accent shrink-0" />}
-																</>
-															)}
-														</div>
-													</div>
-												);
-											})}
-										</div>
-									</div>
-
-									<div>
-										<label className="text-xs font-bold text-primary block mb-1.5">
-											Access Rules & Permissions
-										</label>
-										<PermissionsCategoryList currentRules={editRules} onChangeRules={setEditRules} />
-									</div>
-								</>
-							)}
-
 							<FormField label="Email Address" required type="email" value={editEmail} onChange={setEditEmail} placeholder="e.g. john.doe@enterprise.com" />
-							<FormField label="New Password" type="password" minLength={8} value={editPassword} onChange={(v) => { setEditPassword(v); if (editError) setEditError(''); }} placeholder="Leave blank or enter at least 8 characters" />
+							<CustomSelect label="Assign Manager (optional)" value={editManagerId} onChange={setEditManagerId} options={managerOptions} description="The dashboard user emailed if this user's device stays idle." />
+							<FormField label="New Password (optional)" type="password" minLength={8} value={editPassword} onChange={(v) => { setEditPassword(v); if (editError) setEditError(''); }} placeholder="Leave blank or enter at least 8 characters" />
 							{editError && <p className="text-xs text-rose-500 font-semibold">{editError}</p>}
 
 							<div className="flex items-center justify-end gap-3 pt-3 border-t border-border/60">
 								<button type="button" onClick={() => { setIsEditModalOpen(false); setEditingUser(null); }} className="px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-slate-100 rounded-xl cursor-pointer">Cancel</button>
-								<button type="submit" disabled={editSubmitting} className="px-4 py-2 bg-accent text-accent-foreground font-bold text-xs rounded-xl shadow-sm hover:bg-primary hover:text-primary-foreground cursor-pointer transition-all disabled:opacity-60">
-									{editSubmitting ? 'Saving…' : 'Save Changes'}
+								<button type="submit" disabled={editSubmitting} className="px-5 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-sm hover:bg-accent hover:text-accent-foreground cursor-pointer transition-all disabled:opacity-60 flex items-center gap-2">
+									{editSubmitting && <div className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin"></div>}
+									<span>Save Changes</span>
 								</button>
 							</div>
 						</form>
@@ -1166,137 +1023,36 @@ export default function UsersPage({ onNavigateToDevice }) {
 				document.body
 			)}
 
-			{/* Manage Tenant Roles Modal */}
-			{isRolesModalOpen && ReactDOM.createPortal(
-				<div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-					<div className="bg-background border border-border/80 rounded-2xl p-6 max-w-2xl w-full shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
-						<div className="flex justify-between items-center border-b border-border/60 pb-4">
-							<div className="flex items-center gap-3">
-								<div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold">
-									<ShieldCheck size={20} />
-								</div>
-								<div>
-									<h3 className="text-base font-bold text-primary">Tenant Roles & Access Rules</h3>
-									<p className="text-xs text-muted-foreground">Manage role names and customize access permissions across your tenant</p>
-								</div>
-							</div>
-							<button onClick={() => setIsRolesModalOpen(false)} className="w-8 h-8 rounded-full text-muted-foreground hover:text-primary hover:bg-slate-100 cursor-pointer flex items-center justify-center">
-								<X size={18} />
-							</button>
-						</div>
 
-						<div className="space-y-4 text-xs">
-							<div className="bg-slate-100/60 p-3 rounded-xl border border-border/60 text-muted-foreground text-[11px]">
-								<p className="font-semibold text-primary mb-0.5">Role Naming & Permission Rules:</p>
-								<ul className="list-disc list-inside space-y-0.5">
-									<li><span className="font-bold text-primary">Super Admin</span> & <span className="font-bold text-primary">Admin</span> role names are system-locked and cannot be edited.</li>
-									<li><span className="font-bold text-primary">Role 1</span>, <span className="font-bold text-primary">Role 2</span>, and <span className="font-bold text-primary">Role 3</span> names can be customized.</li>
-									<li>Permission rules for all 5 roles can be customized below.</li>
-								</ul>
-							</div>
-
-							<div className="space-y-4">
-								{tenantRoles.map((role) => (
-									<div key={role.id} className="p-4 rounded-xl border border-border/80 bg-background space-y-3 shadow-2xs">
-										<div className="flex items-center justify-between gap-3 border-b border-border/40 pb-2.5">
-											<div className="flex items-center gap-2">
-												{editingRoleNameId === role.id ? (
-													<div className="flex items-center gap-2">
-														<input
-															type="text"
-															value={tempRoleName}
-															onChange={(e) => setTempRoleName(e.target.value)}
-															onKeyDown={(e) => {
-																if (e.key === 'Enter') handleRenameRole(role.id, tempRoleName);
-															}}
-															autoFocus
-															className="bg-background border border-primary rounded-lg px-2.5 py-1 text-xs font-bold text-primary focus:outline-none"
-														/>
-														<button
-															type="button"
-															onClick={() => handleRenameRole(role.id, tempRoleName)}
-															className="px-2.5 py-1 bg-primary text-primary-foreground font-bold text-xs rounded-lg cursor-pointer"
-														>
-															Save
-														</button>
-													</div>
-												) : (
-													<>
-														<span className="text-sm font-extrabold text-primary flex items-center gap-1.5">
-															{role.name}
-															{!role.isEditableName ? (
-																<span className="text-[10px] bg-slate-200 text-muted-foreground px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-																	<Lock size={10} /> Locked
-																</span>
-															) : (
-																<button
-																	type="button"
-																	onClick={() => {
-																		setEditingRoleNameId(role.id);
-																		setTempRoleName(role.name);
-																	}}
-																	className="p-1 text-muted-foreground hover:text-primary hover:bg-slate-100 rounded cursor-pointer"
-																	title="Edit role name"
-																>
-																	<Pencil size={13} />
-																</button>
-															)}
-														</span>
-													</>
-												)}
-											</div>
-											<span className="text-[11px] text-muted-foreground font-semibold">
-												{role.rules.length} of {AVAILABLE_RULES.length} permissions enabled
-											</span>
-										</div>
-
-										<PermissionsCategoryList
-											currentRules={role.rules}
-											onChangeRules={(nextRules) => handleSaveRoleDefaultRules(role.id, nextRules)}
-										/>
-									</div>
-								))}
-							</div>
-
-							<div className="flex items-center justify-between pt-3 border-t border-border/60">
-								<button
-									type="button"
-									onClick={() => {
-										setTenantRoles(DEFAULT_TENANT_ROLES);
-										setSuccessMsg('Reset all tenant roles to default settings.');
-									}}
-									className="text-xs font-bold text-rose-600 hover:underline cursor-pointer"
-								>
-									Reset to Factory Defaults
-								</button>
-								<button
-									type="button"
-									onClick={() => setIsRolesModalOpen(false)}
-									className="px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-sm hover:bg-accent cursor-pointer"
-								>
-									Done
-								</button>
-							</div>
-						</div>
-					</div>
-				</div>,
-				document.body
-			)}
 		</div>
 	);
 }
 
-function UserSummary({ title, value, icon: IconComponent, tone, badge }) {
+function UserSummary({ title, value, icon: IconComp, tone = 'primary', badge, sub }) {
+	const iconBgClass =
+		tone === 'secondary'
+			? 'bg-accent/10 text-accent'
+			: tone === 'tertiary'
+			? 'bg-amber-500/10 text-amber-500'
+			: tone === 'error'
+			? 'bg-rose-500/10 text-rose-500'
+			: 'bg-primary/10 text-primary';
+
 	return (
 		<div className="bg-background/90 backdrop-blur-xl border border-border/80 p-5 rounded-2xl shadow-sm relative overflow-hidden group hover:border-primary/40 transition-all">
-			<div className="flex items-center justify-between mb-3">
-				<span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{title}</span>
-				<div className={`w-9 h-9 rounded-xl ${tone} flex items-center justify-center`}>
-					<IconComponent size={18} />
+			<div className="flex justify-between items-start mb-3">
+				<div>
+					<h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">{title}</h3>
+					<p className="text-3xl font-black text-primary">{value}</p>
+				</div>
+				<div className={`w-9 h-9 ${iconBgClass} rounded-xl flex items-center justify-center shrink-0`}>
+					<IconComp size={18} />
 				</div>
 			</div>
-			<div className="text-3xl font-black text-primary mb-2">{value}</div>
-			<span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md inline-block">{badge}</span>
+			<div className="flex items-center gap-2">
+				<span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">{badge}</span>
+				{sub && <span className="text-[11px] text-muted-foreground font-medium">{sub}</span>}
+			</div>
 		</div>
 	);
 }

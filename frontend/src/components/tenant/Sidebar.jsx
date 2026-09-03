@@ -33,7 +33,6 @@ const defaultNavItems = [
 		icon: Users,
 		subItems: [
 			{ id: 'users-logs', label: 'Logs', icon: FileText },
-			{ id: 'users-monitor', label: 'Monitor', icon: Activity },
 			{ id: 'users-report', label: 'Report', icon: BarChart3 },
 		],
 	},

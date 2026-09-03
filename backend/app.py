@@ -1846,7 +1846,7 @@ def report_app_usage():
         for rec in records:
             name = (rec.get('applicationName') or '').strip()
             secs = int(rec.get('durationSeconds') or 0)
-            if not name or secs <= 0:
+            if not name or secs <= 0 or 'lockapp' in name.lower():
                 continue
             cur.execute(
                 'INSERT INTO app_usage_records (device_id, application_name, usage_date, duration_seconds, last_updated) '
@@ -1873,8 +1873,9 @@ def get_device_app_usage(device_id):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute('SELECT application_name, duration_seconds FROM app_usage_records '
-                    'WHERE device_id = %s AND usage_date = %s ORDER BY duration_seconds DESC;',
-                    (key, datetime.date.today()))
+                    'WHERE device_id = %s AND usage_date = %s AND LOWER(application_name) NOT LIKE %s '
+                    'ORDER BY duration_seconds DESC;',
+                    (key, datetime.date.today(), '%lockapp%'))
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -2060,6 +2061,51 @@ def get_device_session_events(device_id):
         cur.close(); conn.close()
         return jsonify([{'type': r[0], 'at': to_iso(r[1]), 'detail': r[2]} for r in rows]), 200
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/users/<int:user_id>/session-events', methods=['GET'])
+@app.route('/api/users/<int:user_id>/logs', methods=['GET'])
+def get_user_session_events(user_id):
+    """Activity and session logs for a specific user (last 30 days), newest first."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT "Id", "Username", "Email", "EmployeeCode", "DeviceId", "CreatedDate" FROM app_users WHERE "Id" = %s;', (user_id,))
+        user_row = cur.fetchone()
+        if not user_row:
+            cur.close()
+            conn.close()
+            return jsonify({'error': 'User not found'}), 404
+
+        username = user_row[1]
+        device_id = user_row[4]
+        created_date = user_row[5]
+
+        events = []
+        cur.execute("SELECT to_regclass('public.device_session_events');")
+        if cur.fetchone()[0] is not None and device_id:
+            dev_key = _resolve_device_key(device_id) or device_id
+            cur.execute("SELECT event_type, occurred_at, detail FROM device_session_events "
+                        "WHERE device_id=%s AND occurred_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' "
+                        "ORDER BY occurred_at DESC LIMIT 300;", (dev_key,))
+            rows = cur.fetchall()
+            for r in rows:
+                events.append({'type': r[0], 'at': to_iso(r[1]), 'detail': r[2]})
+
+        if created_date:
+            events.append({
+                'type': 'account_created',
+                'at': to_iso(created_date),
+                'detail': f'User account enrolled ({user_row[3] or username})'
+            })
+
+        cur.close()
+        conn.close()
+        return jsonify(events), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 

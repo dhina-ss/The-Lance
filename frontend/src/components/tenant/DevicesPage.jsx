@@ -541,7 +541,7 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 				networkTotal: formatBytes(netReceived + netSent),
 				installedApps: apps,
 				installedAppsCount: apps.length,
-				appUsage,
+				appUsage: (appUsage || []).filter((item) => !item.applicationName?.toLowerCase().includes('lockapp')),
 				threats,
 				commands,
 				sessionEvents,
@@ -1266,23 +1266,30 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 									<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
 										<SectionTitle icon="hourglass_top" text="Application Usage (Today)" />
 										<div className="space-y-3 text-[13px]">
-											{(inspectDevice.appUsage ?? []).length === 0 && <span className="text-[12px] text-on-surface-variant">No usage recorded today.</span>}
-											{(inspectDevice.appUsage ?? []).slice(0, 8).map((item, i) => {
-												const top = inspectDevice.appUsage[0]?.durationSeconds || 1;
-												const pct = Math.round((item.durationSeconds / top) * 100);
-												const colors = ['bg-primary', 'bg-secondary', 'bg-tertiary', 'bg-outline-variant'];
-												return (
-													<div key={item.applicationName}>
-														<div className="flex justify-between text-[12px] mb-1 font-semibold">
-															<span className="text-on-surface">{item.applicationName}</span>
-															<span className="text-on-surface-variant font-mono">{formatDuration(item.durationSeconds)}</span>
-														</div>
-														<div className="w-full h-2 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
-															<div className={`h-full ${colors[i % colors.length]}`} style={{ width: `${pct}%` }}></div>
-														</div>
-													</div>
+											{(() => {
+												const displayUsage = (inspectDevice.appUsage ?? []).filter(
+													(item) => !item.applicationName?.toLowerCase().includes('lockapp')
 												);
-											})}
+												if (displayUsage.length === 0) {
+													return <span className="text-[12px] text-on-surface-variant">No usage recorded today.</span>;
+												}
+												const top = displayUsage[0]?.durationSeconds || 1;
+												const colors = ['bg-primary', 'bg-secondary', 'bg-tertiary', 'bg-outline-variant'];
+												return displayUsage.slice(0, 8).map((item, i) => {
+													const pct = Math.round((item.durationSeconds / top) * 100);
+													return (
+														<div key={item.applicationName}>
+															<div className="flex justify-between text-[12px] mb-1 font-semibold">
+																<span className="text-on-surface">{item.applicationName}</span>
+																<span className="text-on-surface-variant font-mono">{formatDuration(item.durationSeconds)}</span>
+															</div>
+															<div className="w-full h-2 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
+																<div className={`h-full ${colors[i % colors.length]}`} style={{ width: `${pct}%` }}></div>
+															</div>
+														</div>
+													);
+												});
+											})()}
 										</div>
 									</div>
 								</>

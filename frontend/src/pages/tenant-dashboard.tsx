@@ -142,7 +142,6 @@ export default function TenantDashboardPage() {
 		'devices-report': 'Device Compliance & Fleet Reports',
 		users: 'User Management',
 		'users-logs': 'User Activity & Audit Logs',
-		'users-monitor': 'User Account Monitoring',
 		'users-report': 'User Analytics & Compliance Reports',
 		alerts: 'Critical Alerts Stream',
 		reports: 'Reports & Analytics',
@@ -221,7 +220,7 @@ export default function TenantDashboardPage() {
 						</div>
 					) : activeTab === 'users' || activeTab.startsWith('users-') ? (
 						<div className="relative z-10">
-							<UsersPage onNavigateToDevice={handleNavigateToDevice} />
+							<UsersPage onNavigateToDevice={handleNavigateToDevice} activeSubTab={activeTab} />
 						</div>
 					) : activeTab === 'settings' ? (
 						<div className="relative z-10">

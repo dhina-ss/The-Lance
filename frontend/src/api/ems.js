@@ -31,7 +31,11 @@ export function formatDate(iso) {
 export function formatDateOnly(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+  if (Number.isNaN(d.getTime())) return '—';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
 }
 
 export function formatBytes(bytes) {
@@ -153,8 +157,11 @@ export function fetchInstalledApps(id) {
   return getJson(`/api/devices/${encodeURIComponent(id)}/installed-apps`);
 }
 
-export function fetchAppUsage(id) {
-  return getJson(`/api/devices/${encodeURIComponent(id)}/app-usage`);
+export async function fetchAppUsage(id) {
+  const data = await getJson(`/api/devices/${encodeURIComponent(id)}/app-usage`);
+  return Array.isArray(data)
+    ? data.filter((item) => !item.applicationName?.toLowerCase().includes('lockapp'))
+    : [];
 }
 
 export function fetchNetworkUsage(id, days = 7) {
@@ -396,6 +403,21 @@ export async function deleteUser(id) {
   });
   if (!res.ok) throwForStatus(res.status);
   return res.json();
+}
+
+export async function fetchUserLogs(userId, deviceId) {
+  if (userId) {
+    try {
+      const data = await getJson(`/api/users/${encodeURIComponent(userId)}/logs`);
+      if (Array.isArray(data) && data.length > 0) return data;
+    } catch {
+      // Fall through to device session events
+    }
+  }
+  if (deviceId) {
+    return fetchSessionEvents(deviceId).catch(() => []);
+  }
+  return [];
 }
 
 // ---------- license verification & product download ----------
