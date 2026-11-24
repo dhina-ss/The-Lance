@@ -208,6 +208,28 @@ def health_check():
         "version": "1.0.0"
     })
 
+def _ensure_app_users_columns(cur):
+    try:
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name = 'app_users' AND column_name = 'role'
+                ) THEN
+                    ALTER TABLE app_users ADD COLUMN "role" VARCHAR(100) DEFAULT 'Super Admin';
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name = 'app_users' AND column_name = 'rules'
+                ) THEN
+                    ALTER TABLE app_users ADD COLUMN "rules" JSONB DEFAULT '[]'::jsonb;
+                END IF;
+            END $$;
+        """)
+    except Exception:
+        pass
+
 @app.route('/api/auth/login', methods=['POST'])
 def auth_login():
     data = request.get_json() or {}
@@ -273,10 +295,10 @@ def auth_login():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+
+        # 1. Check primary users table (superadmin / software owner)
         cur.execute('SELECT id, name, email, phone, type FROM users WHERE LOWER(email) = %s AND password = %s;', (email, password))
         user = cur.fetchone()
-        cur.close()
-        conn.close()
 
         if user:
             user_data = {
@@ -284,16 +306,68 @@ def auth_login():
                 'name': user[1],
                 'email': user[2],
                 'phone': user[3],
-                'type': user[4] or 'own'
+                'type': user[4] or 'own',
+                'role': 'Super Admin' if (user[4] or '').lower() in ['own', 'owner', 'superadmin'] else 'Admin',
+                'rules': []
             }
             token = generate_token(user_data)
+            cur.close()
+            conn.close()
             return jsonify({
                 'success': True,
                 'token': token,
                 'user': user_data
             }), 200
+
+        # 2. Check app_users table (tenant product dashboard users, e.g. HR Manager)
+        _ensure_app_users_columns(cur)
+        cur.execute("""
+            SELECT "Id", "Username", "Email", "user_type", "role", "rules"
+            FROM app_users
+            WHERE LOWER("Email") = %s AND "PasswordHash" = %s
+            LIMIT 1;
+        """, (email, password))
+        app_user = cur.fetchone()
+
+        if app_user:
+            import json as _json
+            rules_raw = app_user[5]
+            if isinstance(rules_raw, str):
+                try:
+                    rules_val = _json.loads(rules_raw)
+                except Exception:
+                    rules_val = []
+            elif isinstance(rules_raw, list):
+                rules_val = rules_raw
+            else:
+                rules_val = []
+
+            user_role = app_user[4] or 'HR Manager'
+            user_data = {
+                'id': app_user[0],
+                'name': app_user[1],
+                'email': app_user[2],
+                'phone': '',
+                'type': 'ems',
+                'userType': app_user[3] or 'Dashboard User',
+                'role': user_role,
+                'rules': rules_val
+            }
+            token = generate_token(user_data)
+            cur.close()
+            conn.close()
+            return jsonify({
+                'success': True,
+                'token': token,
+                'user': user_data
+            }), 200
+
+        cur.close()
+        conn.close()
         return jsonify({'error': 'Invalid email or password'}), 401
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/licenses/validate', methods=['POST'])
@@ -2296,8 +2370,10 @@ def update_device_store_gating(device_id):
 def get_app_users():
     try:
         import psycopg2.extras
+        import json as _json
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        _ensure_app_users_columns(cur)
         cur.execute("""
             SELECT u.*, d."DeviceName", d."Model", d."IPAddress",
                    m."Username" AS "ManagerName"
@@ -2312,6 +2388,17 @@ def get_app_users():
 
         users = []
         for r in rows:
+            rules_raw = r.get('rules')
+            if isinstance(rules_raw, str):
+                try:
+                    rules_val = _json.loads(rules_raw)
+                except Exception:
+                    rules_val = []
+            elif isinstance(rules_raw, list):
+                rules_val = rules_raw
+            else:
+                rules_val = []
+
             users.append({
                 'id': r['Id'],
                 'email': r['Email'],
@@ -2323,6 +2410,8 @@ def get_app_users():
                 'deviceModel': r['Model'],
                 'deviceIp': r['IPAddress'],
                 'userType': r.get('user_type') or 'Device User',
+                'role': r.get('role') or 'Super Admin',
+                'rules': rules_val,
                 'managerUserId': r.get('manager_user_id'),
                 'managerName': r.get('ManagerName')
             })
@@ -2442,12 +2531,17 @@ def create_app_user():
         device_id = data.get('deviceId', '').strip()
         user_type = (data.get('userType') or data.get('type') or 'Device User').strip() or 'Device User'
         manager_user_id = data.get('managerUserId') or None
+        role = (data.get('role') or 'Super Admin').strip()
+        rules = data.get('rules') or []
+        import json as _json
+        rules_json = _json.dumps(rules) if isinstance(rules, (list, dict)) else '[]'
 
         if not email or not username:
             return jsonify({'error': 'Email and username are required'}), 400
 
         conn = get_db_connection()
         cur = conn.cursor()
+        _ensure_app_users_columns(cur)
 
         # Enforce the tenant's dashboard-user cap (set by the super admin).
         limit = _tenant_user_limit(cur)
@@ -2463,10 +2557,10 @@ def create_app_user():
                 }), 403
 
         cur.execute("""
-            INSERT INTO app_users ("Email", "EmployeeCode", "Username", "PasswordHash", "DeviceId", "user_type", "manager_user_id")
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO app_users ("Email", "EmployeeCode", "Username", "PasswordHash", "DeviceId", "user_type", "manager_user_id", "role", "rules")
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING "Id", "CreatedDate";
-        """, (email, emp_code, username, password, device_id or None, user_type, manager_user_id))
+        """, (email, emp_code, username, password, device_id or None, user_type, manager_user_id, role, rules_json))
         new_row = cur.fetchone()
         conn.commit()
         cur.close()
@@ -2480,6 +2574,8 @@ def create_app_user():
             'createdDate': new_row[1].isoformat() if new_row[1] else None,
             'deviceId': device_id,
             'userType': user_type,
+            'role': role,
+            'rules': rules,
             'managerUserId': manager_user_id
         }), 201
     except Exception as e:
@@ -2498,29 +2594,35 @@ def update_app_user(user_id):
         password = data.get('password', '').strip()
         user_type = (data.get('userType') or data.get('type') or 'Device User').strip() or 'Device User'
         manager_user_id = data.get('managerUserId') or None
+        role = (data.get('role') or 'Super Admin').strip()
+        rules = data.get('rules') or []
+        import json as _json
+        rules_json = _json.dumps(rules) if isinstance(rules, (list, dict)) else '[]'
 
         conn = get_db_connection()
         cur = conn.cursor()
+        _ensure_app_users_columns(cur)
         if password:
             cur.execute("""
                 UPDATE app_users
                 SET "Email" = %s, "EmployeeCode" = %s, "Username" = %s, "PasswordHash" = %s,
-                    "user_type" = %s, "manager_user_id" = %s
+                    "user_type" = %s, "manager_user_id" = %s, "role" = %s, "rules" = %s
                 WHERE "Id" = %s;
-            """, (email, emp_code, username, password, user_type, manager_user_id, user_id))
+            """, (email, emp_code, username, password, user_type, manager_user_id, role, rules_json, user_id))
         else:
             cur.execute("""
                 UPDATE app_users
                 SET "Email" = %s, "EmployeeCode" = %s, "Username" = %s,
-                    "user_type" = %s, "manager_user_id" = %s
+                    "user_type" = %s, "manager_user_id" = %s, "role" = %s, "rules" = %s
                 WHERE "Id" = %s;
-            """, (email, emp_code, username, user_type, manager_user_id, user_id))
+            """, (email, emp_code, username, user_type, manager_user_id, role, rules_json, user_id))
         conn.commit()
         cur.close()
         conn.close()
 
         return jsonify({'id': user_id, 'email': email, 'employeeCode': emp_code,
                         'username': username, 'userType': user_type,
+                        'role': role, 'rules': rules,
                         'managerUserId': manager_user_id}), 200
     except Exception as e:
         import traceback

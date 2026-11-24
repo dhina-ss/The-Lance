@@ -2,7 +2,7 @@ import { Helmet } from '@dr.pogodin/react-helmet';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft, CheckCircle } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft, CheckCircle, AlertCircle, X } from 'lucide-react';
 
 const fadeUp = {
     hidden: { opacity: 0, y: 24 },
@@ -25,9 +25,11 @@ export default function LoginPage() {
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [status, setStatus] = useState<'idle' | 'loading' | 'success'>('idle');
+    const [errorMessage, setErrorMessage] = useState('');
 
     async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault();
+        setErrorMessage('');
         setStatus('loading');
 
         try {
@@ -37,8 +39,9 @@ export default function LoginPage() {
                 body: JSON.stringify({ email, password }),
             });
 
-            if (res.ok) {
-                const data = await res.json();
+            const data = await res.json().catch(() => null);
+
+            if (res.ok && data && data.success !== false && (data.token || data.user)) {
                 if (data.token) {
                     try { localStorage.setItem('auth_token', data.token); } catch {}
                 }
@@ -56,37 +59,21 @@ export default function LoginPage() {
                 }, 800);
                 return;
             }
-        } catch (e) {
-            console.warn('Login API call failed, falling back to role check:', e);
+
+            // Authentication failed - do not log in and do not redirect
+            setStatus('idle');
+            const errorMsg =
+                data?.error ||
+                data?.message ||
+                (res.status === 401
+                    ? 'Invalid email or password. Please try again.'
+                    : 'Authentication failed. Please check your credentials.');
+            setErrorMessage(errorMsg);
+        } catch (err) {
+            console.error('Login error:', err);
+            setStatus('idle');
+            setErrorMessage('Unable to connect to the authentication server. Please check your network and try again.');
         }
-
-        // Fallback for local demo preview
-        const lower = email.toLowerCase().trim();
-        const fallbackType = (lower === 'superadmin@gmail.com' || lower === 'contact@thelance.in' || lower.includes('super')) ? 'own' : 'ems';
-        const fallbackUser = {
-            name: lower === 'contact@thelance.in' ? 'Dhinakaran Sekar' : lower.includes('super') ? 'Super Admin' : 'Tenant Admin',
-            email: email,
-            type: fallbackType
-        };
-        try { localStorage.setItem('user_profile', JSON.stringify(fallbackUser)); } catch {}
-
-        setTimeout(() => {
-            setStatus('success');
-            setTimeout(() => {
-                if (fallbackType === 'own') {
-                    navigate('/dashboard');
-                } else {
-                    navigate('/tenant-dashboard');
-                }
-            }, 800);
-        }, 1000);
-    }
-
-    function handleSocialLogin() {
-        setStatus('loading');
-        setTimeout(() => {
-            navigate('/dashboard');
-        }, 800);
     }
 
     return (
@@ -205,6 +192,34 @@ export default function LoginPage() {
                                 </div>
                             ) : (
                                 <form onSubmit={handleSubmit} className="space-y-5">
+                                    {/* Error Notification Card */}
+                                    {errorMessage && (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            className="flex items-start gap-3 p-3.5 rounded-xl bg-destructive/10 border border-destructive/30 text-destructive text-sm shadow-sm"
+                                            role="alert"
+                                        >
+                                            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                                            <div className="flex-1">
+                                                <p className="font-semibold text-xs uppercase tracking-wider text-destructive mb-0.5">
+                                                    Login Error
+                                                </p>
+                                                <p className="text-xs text-destructive/90 leading-relaxed font-normal">
+                                                    {errorMessage}
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setErrorMessage('')}
+                                                className="text-destructive/60 hover:text-destructive hover:bg-destructive/15 transition-colors p-1 -mr-1 -mt-1 rounded-lg"
+                                                aria-label="Dismiss error"
+                                            >
+                                                <X size={15} />
+                                            </button>
+                                        </motion.div>
+                                    )}
+
                                     {/* Email Address */}
                                     <div>
                                         <label htmlFor="email" className="block text-xs font-semibold text-primary uppercase tracking-wider mb-2">
@@ -216,7 +231,10 @@ export default function LoginPage() {
                                                 type="email"
                                                 required
                                                 value={email}
-                                                onChange={(e) => setEmail(e.target.value)}
+                                                onChange={(e) => {
+                                                    setEmail(e.target.value);
+                                                    if (errorMessage) setErrorMessage('');
+                                                }}
                                                 placeholder="Enter your email"
                                                 className="w-full px-4 py-3 pl-11 bg-background border border-input rounded-xl text-sm font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors duration-200"
                                             />
@@ -240,7 +258,10 @@ export default function LoginPage() {
                                                 type={showPassword ? 'text' : 'password'}
                                                 required
                                                 value={password}
-                                                onChange={(e) => setPassword(e.target.value)}
+                                                onChange={(e) => {
+                                                    setPassword(e.target.value);
+                                                    if (errorMessage) setErrorMessage('');
+                                                }}
                                                 placeholder="Enter your password"
                                                 className="w-full px-4 py-3 pl-11 pr-11 bg-background border border-input rounded-xl text-sm font-medium text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors duration-200"
                                             />

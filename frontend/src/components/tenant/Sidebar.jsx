@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
 	LayoutDashboard,
@@ -14,6 +14,7 @@ import {
 	Sliders,
 	FileText,
 } from 'lucide-react';
+import { getStoredTenantRoles, ALL_SUBRULE_IDS } from './tenantRoles';
 
 const defaultNavItems = [
 	{ id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -46,6 +47,129 @@ export default function Sidebar({ activeTab: externalActiveTab, setActiveTab: ex
 	const activeTab = externalActiveTab || 'dashboard';
 	const setActiveTab = externalSetActiveTab || (() => { });
 
+	// Dynamic user profile from login session
+	const storedUser = useMemo(() => {
+		try {
+			const u = localStorage.getItem('user_profile');
+			return u ? JSON.parse(u) : null;
+		} catch {
+			return null;
+		}
+	}, []);
+
+	const userName = storedUser?.name || 'Tenant Admin';
+	const userEmail = storedUser?.email || 'admin@gmail.com';
+	const userRole = storedUser?.role || (storedUser?.type === 'own' ? 'Super Admin' : 'Tenant Admin');
+	const isSuperAdmin =
+		userRole.toLowerCase() === 'super admin' ||
+		userRole.toLowerCase() === 'superadmin' ||
+		(storedUser?.type || '').toLowerCase() === 'own' ||
+		(storedUser?.type || '').toLowerCase() === 'superadmin';
+
+	const activeRules = useMemo(() => {
+		if (isSuperAdmin) {
+			return ALL_SUBRULE_IDS;
+		}
+		if (Array.isArray(storedUser?.rules) && storedUser.rules.length > 0) {
+			return storedUser.rules;
+		}
+		const roles = getStoredTenantRoles();
+		const matchedRole = roles.find((r) => r.name.toLowerCase() === userRole.toLowerCase());
+		if (matchedRole && Array.isArray(matchedRole.rules)) {
+			return matchedRole.rules;
+		}
+		return [];
+	}, [isSuperAdmin, userRole, storedUser]);
+
+	const isItemAllowed = useCallback((itemId) => {
+		if (isSuperAdmin) return true;
+		const rules = activeRules;
+
+		switch (itemId) {
+			case 'dashboard':
+				return true;
+
+			case 'devices-monitor':
+				return rules.some((r) =>
+					r === 'telemetry_monitoring' ||
+					r === 'perf:realtime' ||
+					r === 'device:hardware_identity' ||
+					r === 'device:os_build' ||
+					r === 'device:network_telemetry' ||
+					r === 'device:precise_location' ||
+					r === 'device:app_usage'
+				);
+
+			case 'devices-control':
+				return rules.some((r) =>
+					r === 'security_controls' ||
+					r === 'control:startup_login' ||
+					r === 'security:usb_control' ||
+					r === 'security:website_filter' ||
+					r === 'security:antivirus_threat'
+				);
+
+			case 'devices-report':
+				return rules.some((r) =>
+					r === 'software_mgmt' ||
+					r === 'software:installed_apps' ||
+					r === 'software:remote_push'
+				);
+
+			case 'devices':
+				return (
+					isItemAllowed('devices-monitor') ||
+					isItemAllowed('devices-control') ||
+					isItemAllowed('devices-report')
+				);
+
+			case 'users-logs':
+				return rules.some((r) => r === 'user_auditing' || r === 'users:user_logs');
+
+			case 'users-report':
+				return rules.some((r) => r === 'user_auditing' || r === 'users:user_logs');
+
+			case 'users':
+				return (
+					isItemAllowed('users-logs') ||
+					isItemAllowed('users-report')
+				);
+
+			case 'alerts':
+				return rules.some((r) =>
+					r === 'security_controls' ||
+					r === 'security:antivirus_threat'
+				);
+
+			case 'reports':
+				return rules.some((r) =>
+					r === 'telemetry_monitoring' ||
+					r === 'software_mgmt' ||
+					r === 'user_auditing'
+				);
+
+			case 'settings':
+				return isSuperAdmin || userRole.toLowerCase() === 'admin' || rules.includes('settings');
+
+			default:
+				return true;
+		}
+	}, [isSuperAdmin, activeRules, userRole]);
+
+	const visibleNavItems = useMemo(() => {
+		return defaultNavItems
+			.map((item) => {
+				if (item.subItems) {
+					const filteredSubItems = item.subItems.filter((sub) => isItemAllowed(sub.id));
+					if (filteredSubItems.length === 0) return null;
+					return { ...item, subItems: filteredSubItems };
+				}
+				if (!isItemAllowed(item.id)) return null;
+				return item;
+			})
+			.filter(Boolean);
+	}, [isItemAllowed]);
+
 	const [openSubmenu, setOpenSubmenu] = useState(() => {
 		if (activeTab.startsWith('devices')) return 'devices';
 		if (activeTab.startsWith('users')) return 'users';
@@ -60,22 +184,21 @@ export default function Sidebar({ activeTab: externalActiveTab, setActiveTab: ex
 		}
 	}, [activeTab]);
 
+	useEffect(() => {
+		if (visibleNavItems.length > 0) {
+			const isCurrentAllowed = isItemAllowed(activeTab);
+			if (!isCurrentAllowed) {
+				const firstItem = visibleNavItems[0];
+				const targetId = firstItem.subItems ? firstItem.subItems[0].id : firstItem.id;
+				setActiveTab(targetId);
+			}
+		}
+	}, [activeTab, visibleNavItems, isItemAllowed, setActiveTab]);
+
 	const toggleSubmenu = (itemId) => {
 		setOpenSubmenu((prev) => (prev === itemId ? null : itemId));
 	};
 
-	// Dynamic user profile from login session
-	const storedUser = React.useMemo(() => {
-		try {
-			const u = localStorage.getItem('user_profile');
-			return u ? JSON.parse(u) : null;
-		} catch {
-			return null;
-		}
-	}, []);
-
-	const userName = storedUser?.name || 'Tenant Admin';
-	const userEmail = storedUser?.email || 'admin@gmail.com';
 	const initials = userName
 		.split(' ')
 		.filter(Boolean)
@@ -94,17 +217,20 @@ export default function Sidebar({ activeTab: externalActiveTab, setActiveTab: ex
 						alt="TL Logo Mark"
 						className="block h-10 md:h-10 w-auto object-contain shrink-0"
 					/>
-					<div className="w-full bg-accent rounded-lg px-2 py-1.5">
-						<p className="text-[12px] text-primary text-center font-bold tracking-wide uppercase">Tenant Console</p>
+					<div className="w-full bg-accent rounded-lg px-2.5 py-1.5 flex items-center justify-between">
+						<p className="text-[11px] text-primary font-bold tracking-wide uppercase">Tenant Console</p>
+						<span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold truncate max-w-[100px]" title={userRole}>
+							{userRole}
+						</span>
 					</div>
 				</div>
 
 				{/* Navigation Menu */}
 				<div className="space-y-1.5">
 					<p className="px-3 text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground/70 mb-2">
-						Default Features
+						{isSuperAdmin ? 'All Feature Modules' : 'Assigned Feature Modules'}
 					</p>
-					{defaultNavItems.map((item) => {
+					{visibleNavItems.map((item) => {
 						const Icon = item.icon;
 						const hasSubItems = Boolean(item.subItems && item.subItems.length > 0);
 						const isParentActive = activeTab === item.id || activeTab.startsWith(item.id + '-');
@@ -182,7 +308,12 @@ export default function Sidebar({ activeTab: externalActiveTab, setActiveTab: ex
 						</div>
 						<div className="min-w-0 flex-1">
 							<p className="text-xs font-bold text-primary truncate">{userName}</p>
-							<p className="text-[10px] text-muted-foreground truncate">{userEmail}</p>
+							<div className="flex items-center gap-1.5 mt-0.5">
+								<span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-accent/15 text-accent border border-accent/25 truncate max-w-[95px]" title={userRole}>
+									{userRole}
+								</span>
+								<span className="text-[10px] text-muted-foreground truncate">{userEmail}</span>
+							</div>
 						</div>
 					</div>
 					<button

@@ -1,17 +1,32 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 
 export default function Header({ pageTitle = 'Dashboard Overview', onDownloadClick, downloading = false }) {
   const handleDownload = () => { if (!downloading) onDownloadClick?.(); };
 
+  const storedUser = useMemo(() => {
+    try {
+      const u = localStorage.getItem('user_profile');
+      return u ? JSON.parse(u) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const userRole = storedUser?.role || (storedUser?.type === 'own' ? 'Super Admin' : 'Tenant Admin');
+
   return (
     <header className="sticky top-0 z-40 w-full bg-background/90 backdrop-blur-xl border-b border-border/80 px-6 lg:px-10 pb-4 pt-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
       <div className="flex items-center gap-3">
         <div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-xl lg:text-2xl font-extrabold text-primary tracking-tight">
               {pageTitle}
             </h1>
+            <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-accent/15 text-accent border border-accent/25 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+              Role: {userRole}
+            </span>
             <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               Live Telemetry
