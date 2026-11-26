@@ -1113,12 +1113,16 @@ def send_email(to_addr, subject, body_html):
         return False, str(e)
 
 
-def _tenant_inactivity(cur):
+def _tenant_inactivity(cur, tenant_id=None):
     """(lock_minutes, alert_minutes) for the deployment's tenant, defaulting to
-    5 / 10 when unset. Single-tenant deployment, so the first tenant wins."""
+    5 / 10 when unset."""
     try:
-        cur.execute('SELECT COALESCE(inactivity_lock_minutes, 5), '
-                    'COALESCE(inactivity_alert_minutes, 10) FROM tenants ORDER BY id LIMIT 1;')
+        if tenant_id is not None:
+            cur.execute('SELECT COALESCE(inactivity_lock_minutes, 5), '
+                        'COALESCE(inactivity_alert_minutes, 10) FROM tenants WHERE id=%s LIMIT 1;', (tenant_id,))
+        else:
+            cur.execute('SELECT COALESCE(inactivity_lock_minutes, 5), '
+                        'COALESCE(inactivity_alert_minutes, 10) FROM tenants ORDER BY updated_at DESC NULLS LAST, id LIMIT 1;')
         row = cur.fetchone()
         if row:
             return int(row[0] or 5), int(row[1] or 10)
@@ -2847,7 +2851,8 @@ def get_tenant_settings():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        lock_min, alert_min = _tenant_inactivity(cur)
+        tid = _current_tenant_id(cur)
+        lock_min, alert_min = _tenant_inactivity(cur, tid)
         cur.close()
         conn.close()
         return jsonify({'inactivityLockMinutes': lock_min,
