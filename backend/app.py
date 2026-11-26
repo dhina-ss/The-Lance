@@ -1398,6 +1398,7 @@ def device_heartbeat():
         cur.execute('SELECT domain FROM blocked_websites WHERE device_id=%s;', (device_id,))
         blocked = sorted({d for d in (normalize_domain(r[0]) for r in cur.fetchall()) if d})
         lock_min, alert_min = _tenant_inactivity(cur)
+        update_info = get_latest_installer_metadata(cur)
         conn.commit()
         cur.close()
         conn.close()
@@ -1410,7 +1411,10 @@ def device_heartbeat():
             'requireLoginEachStartup': bool(row[2]) if row else False,
             'inactivityLockSeconds': lock_min * 60,
             'inactivityAlertSeconds': alert_min * 60,
-            'blockedWebsites': blocked
+            'blockedWebsites': blocked,
+            'latestAgentVersion': update_info.get('version'),
+            'updateDownloadUrl': update_info.get('downloadUrl'),
+            'updateSha256': update_info.get('sha256'),
         }), 200
     except Exception as e:
         import traceback
@@ -2915,7 +2919,60 @@ def verify_license_download():
         traceback.print_exc()
         return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
 
-_installer_cache = {'key': None, 'name': None, 'data': None}
+_installer_cache = {'key': None, 'name': None, 'data': None, 'sha256': None, 'version': None}
+
+
+def get_latest_installer_metadata(cur):
+    """Lightweight metadata lookup for heartbeat auto-update checks."""
+    global _installer_cache
+    try:
+        cur.execute("SELECT to_regclass('public.app_installers');")
+        if cur.fetchone()[0] is None:
+            return {}
+        cur.execute('SELECT file_name, version, size_bytes, uploaded_at '
+                    'FROM app_installers ORDER BY uploaded_at DESC LIMIT 1;')
+        meta = cur.fetchone()
+        if not meta or not meta[1]:
+            return {}
+        key = f"{meta[2]}|{meta[3]}"
+        if _installer_cache.get('key') == key and _installer_cache.get('sha256'):
+            return {
+                'version': meta[1],
+                'downloadUrl': '/api/installers/latest/download',
+                'sha256': _installer_cache['sha256'],
+            }
+        # Only compute sha256 once when cache key changes
+        cur.execute('SELECT content FROM app_installers ORDER BY uploaded_at DESC LIMIT 1;')
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            data = bytes(row[0])
+            digest = hashlib.sha256(data).hexdigest()
+            _installer_cache = {
+                'key': key,
+                'name': meta[0] or 'TheLanceEMSSetup.exe',
+                'data': data,
+                'sha256': digest,
+                'version': meta[1],
+            }
+            return {
+                'version': meta[1],
+                'downloadUrl': '/api/installers/latest/download',
+                'sha256': digest,
+            }
+    except Exception as e:
+        print(f"Installer metadata lookup failed: {e}")
+    return {}
+
+
+@app.route('/api/installers/latest/download', methods=['GET'])
+def download_latest_installer_for_agent():
+    """Agent auto-update endpoint: streams the latest installer .exe."""
+    from flask import send_file
+    import io
+    name, data = get_installer_bytes()
+    if data is None:
+        return jsonify({'error': 'No installer available'}), 404
+    return send_file(io.BytesIO(data), as_attachment=True, download_name=name or 'TheLanceEMSSetup.exe')
 
 
 def get_installer_bytes():
@@ -2935,8 +2992,8 @@ def get_installer_bytes():
         cur = conn.cursor()
         cur.execute("SELECT to_regclass('public.app_installers');")
         if cur.fetchone()[0] is not None:
-            cur.execute('SELECT file_name, size_bytes, uploaded_at FROM app_installers '
-                        'ORDER BY uploaded_at DESC LIMIT 1;')
+            cur.execute('SELECT file_name, size_bytes, uploaded_at, version '
+                        'FROM app_installers ORDER BY uploaded_at DESC LIMIT 1;')
             meta = cur.fetchone()
             if meta:
                 key = f"{meta[1]}|{meta[2]}"
@@ -2948,7 +3005,13 @@ def get_installer_bytes():
                 if row and row[0] is not None:
                     name = meta[0] or 'TheLanceEMSSetup.exe'
                     data = bytes(row[0])
-                    _installer_cache = {'key': key, 'name': name, 'data': data}
+                    _installer_cache = {
+                        'key': key,
+                        'name': name,
+                        'data': data,
+                        'sha256': hashlib.sha256(data).hexdigest(),
+                        'version': meta[3],
+                    }
                     cur.close(); conn.close()
                     return (name, data)
         cur.close(); conn.close()
