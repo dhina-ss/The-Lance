@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import XLSX from 'xlsx-js-style';
 import {
 	FileText,
@@ -21,11 +21,13 @@ import {
 	WifiOff,
 	ShieldCheck,
 	ShieldAlert,
-	ArrowRight,
 	CheckCircle2,
 	Loader2,
 	ChevronLeft,
 	ChevronRight,
+	ChevronDown,
+	Filter,
+	Check,
 	Calendar,
 } from 'lucide-react';
 import { fetchAllUserLogs, fetchDevices, fetchUsers, formatDate, relativeTime } from '../../api/ems';
@@ -179,8 +181,20 @@ function exportStyledSheet(sheetName, fileName, headers, rows, centerCols = [0])
 	XLSX.writeFile(wb, fileName);
 }
 
+const EVENT_FILTER_OPTIONS = [
+	{ id: 'ALL', label: 'All Events', dot: 'bg-primary', icon: Filter },
+	{ id: 'login', label: 'User Login', dot: 'bg-emerald-500', icon: LogIn },
+	{ id: 'logoff', label: 'User Logoff', dot: 'bg-slate-500', icon: LogOut },
+	{ id: 'lock', label: 'Screen Locked', dot: 'bg-amber-500', icon: Lock },
+	{ id: 'unlock', label: 'Screen Unlocked', dot: 'bg-blue-500', icon: Unlock },
+	{ id: 'sleep', label: 'Device Sleep', dot: 'bg-indigo-500', icon: Moon },
+	{ id: 'wake', label: 'Device Woke', dot: 'bg-sky-500', icon: Sun },
+	{ id: 'device_on', label: 'Device On', dot: 'bg-cyan-500', icon: Power },
+	{ id: 'shutdown', label: 'Device Shutdown', dot: 'bg-rose-500', icon: Power },
+];
+
 export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
-	const [activeCard, setActiveCard] = useState('user-logs'); // 'user-logs' | 'device-report'
+	const [activeCard, setActiveCard] = useState(null); // null | 'user-logs' | 'device-report'
 	const [devices, setDevices] = useState([]);
 	const [users, setUsers] = useState([]);
 	const [userLogs, setUserLogs] = useState([]);
@@ -193,10 +207,22 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 	const [searchTerm, setSearchTerm] = useState('');
 	const [daysWindow, setDaysWindow] = useState(30); // 1 | 7 | 30
 	const [eventFilter, setEventFilter] = useState('ALL');
+	const [isEventDropdownOpen, setIsEventDropdownOpen] = useState(false);
+	const eventDropdownRef = useRef(null);
 	const [deviceStatusFilter, setDeviceStatusFilter] = useState('ALL');
 	const [currentPage, setCurrentPage] = useState(1);
 	const pageSize = 15;
 	const [exportingKind, setExportingKind] = useState(null);
+
+	useEffect(() => {
+		const handleOutsideClick = (e) => {
+			if (eventDropdownRef.current && !eventDropdownRef.current.contains(e.target)) {
+				setIsEventDropdownOpen(false);
+			}
+		};
+		document.addEventListener('mousedown', handleOutsideClick);
+		return () => document.removeEventListener('mousedown', handleOutsideClick);
+	}, []);
 
 	const loadAll = async (silent = false, days = daysWindow) => {
 		if (!silent) setLoading(true);
@@ -305,7 +331,11 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 		});
 	}, [devices, searchTerm, deviceStatusFilter]);
 
-	const activeList = activeCard === 'user-logs' ? filteredUserLogs : filteredDevices;
+	const activeList = activeCard === 'user-logs'
+		? filteredUserLogs
+		: activeCard === 'device-report'
+		? filteredDevices
+		: [];
 	const totalPages = Math.max(1, Math.ceil(activeList.length / pageSize));
 	const safePage = Math.min(currentPage, totalPages);
 	const paginated = activeList.slice((safePage - 1) * pageSize, safePage * pageSize);
@@ -389,7 +419,7 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 			<section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 				{/* Card 1: User Logs */}
 				<div
-					onClick={() => setActiveCard('user-logs')}
+					onClick={() => setActiveCard((prev) => (prev === 'user-logs' ? null : 'user-logs'))}
 					className={`bg-background/95 backdrop-blur-xl rounded-2xl p-6 transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between gap-5 ${
 						activeCard === 'user-logs'
 							? 'border-2 border-accent shadow-lg shadow-accent/10 ring-2 ring-accent/15'
@@ -419,73 +449,11 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 							{logStats.total} logs
 						</span>
 					</div>
-
-					<div className="grid grid-cols-4 gap-2.5">
-						<div className="bg-slate-50/90 border border-border/60 rounded-xl px-3 py-2.5">
-							<span className="text-[10px] font-bold uppercase text-muted-foreground block">Today</span>
-							<span className="text-base font-black text-primary">{logStats.todayCount}</span>
-						</div>
-						<div className="bg-emerald-50/60 border border-emerald-200/70 rounded-xl px-3 py-2.5">
-							<span className="text-[10px] font-bold uppercase text-emerald-700 block">Login / Wake</span>
-							<span className="text-base font-black text-emerald-700">{logStats.loginCount}</span>
-						</div>
-						<div className="bg-indigo-50/60 border border-indigo-200/70 rounded-xl px-3 py-2.5">
-							<span className="text-[10px] font-bold uppercase text-indigo-700 block">Sleep / Lock</span>
-							<span className="text-base font-black text-indigo-700">{logStats.sleepWakeCount}</span>
-						</div>
-						<div className="bg-rose-50/60 border border-rose-200/70 rounded-xl px-3 py-2.5">
-							<span className="text-[10px] font-bold uppercase text-rose-700 block">Shutdown</span>
-							<span className="text-base font-black text-rose-700">{logStats.shutdownCount}</span>
-						</div>
-					</div>
-
-					<div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/50">
-						<div className="flex items-center gap-2">
-							<button
-								type="button"
-								onClick={(e) => {
-									e.stopPropagation();
-									setActiveCard('user-logs');
-								}}
-								className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-									activeCard === 'user-logs'
-										? 'bg-primary text-primary-foreground shadow-sm'
-										: 'bg-slate-100 text-primary hover:bg-slate-200/80'
-								}`}
-							>
-								<FileText size={14} /> View User Logs
-							</button>
-							<button
-								type="button"
-								disabled={exportingKind === 'user-logs'}
-								onClick={(e) => {
-									e.stopPropagation();
-									handleExportUserLogs();
-								}}
-								className="px-3.5 py-2 rounded-xl text-xs font-bold bg-accent/10 text-accent hover:bg-accent hover:text-white border border-accent/20 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-60"
-							>
-								{exportingKind === 'user-logs' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-								<span>Export Excel</span>
-							</button>
-						</div>
-						{onNavigateTab && (
-							<button
-								type="button"
-								onClick={(e) => {
-									e.stopPropagation();
-									onNavigateTab('users-logs');
-								}}
-								className="text-xs font-bold text-muted-foreground hover:text-accent flex items-center gap-1 cursor-pointer transition-colors"
-							>
-								Users Page <ArrowRight size={13} />
-							</button>
-						)}
-					</div>
 				</div>
 
 				{/* Card 2: Device Report */}
 				<div
-					onClick={() => setActiveCard('device-report')}
+					onClick={() => setActiveCard((prev) => (prev === 'device-report' ? null : 'device-report'))}
 					className={`bg-background/95 backdrop-blur-xl rounded-2xl p-6 transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between gap-5 ${
 						activeCard === 'device-report'
 							? 'border-2 border-accent shadow-lg shadow-accent/10 ring-2 ring-accent/15'
@@ -516,73 +484,13 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 						</span>
 					</div>
 
-					<div className="grid grid-cols-4 gap-2.5">
-						<div className="bg-emerald-50/60 border border-emerald-200/70 rounded-xl px-3 py-2.5">
-							<span className="text-[10px] font-bold uppercase text-emerald-700 block">Online</span>
-							<span className="text-base font-black text-emerald-700">{deviceStats.online}</span>
-						</div>
-						<div className="bg-amber-50/60 border border-amber-200/70 rounded-xl px-3 py-2.5">
-							<span className="text-[10px] font-bold uppercase text-amber-700 block">Sleep</span>
-							<span className="text-base font-black text-amber-700">{deviceStats.sleep}</span>
-						</div>
-						<div className="bg-rose-50/60 border border-rose-200/70 rounded-xl px-3 py-2.5">
-							<span className="text-[10px] font-bold uppercase text-rose-700 block">Offline</span>
-							<span className="text-base font-black text-rose-700">{deviceStats.offline}</span>
-						</div>
-						<div className="bg-slate-50/90 border border-border/60 rounded-xl px-3 py-2.5">
-							<span className="text-[10px] font-bold uppercase text-muted-foreground block">Secured</span>
-							<span className="text-base font-black text-primary">{deviceStats.optimal}</span>
-						</div>
-					</div>
-
-					<div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/50">
-						<div className="flex items-center gap-2">
-							<button
-								type="button"
-								onClick={(e) => {
-									e.stopPropagation();
-									setActiveCard('device-report');
-								}}
-								className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-									activeCard === 'device-report'
-										? 'bg-primary text-primary-foreground shadow-sm'
-										: 'bg-slate-100 text-primary hover:bg-slate-200/80'
-								}`}
-							>
-								<Monitor size={14} /> View Device Report
-							</button>
-							<button
-								type="button"
-								disabled={exportingKind === 'device-report'}
-								onClick={(e) => {
-									e.stopPropagation();
-									handleExportDeviceReport();
-								}}
-								className="px-3.5 py-2 rounded-xl text-xs font-bold bg-accent/10 text-accent hover:bg-accent hover:text-white border border-accent/20 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-60"
-							>
-								{exportingKind === 'device-report' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-								<span>Export Excel</span>
-							</button>
-						</div>
-						{onNavigateTab && (
-							<button
-								type="button"
-								onClick={(e) => {
-									e.stopPropagation();
-									onNavigateTab('devices-report');
-								}}
-								className="text-xs font-bold text-muted-foreground hover:text-accent flex items-center gap-1 cursor-pointer transition-colors"
-							>
-								Devices Report <ArrowRight size={13} />
-							</button>
-						)}
-					</div>
 				</div>
 			</section>
 
-			{/* Detailed Report Table */}
-			<div className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl shadow-sm overflow-hidden">
-				<div className="p-6 border-b border-border/60 space-y-4">
+			{/* Detailed Report Table (shown after selecting a card) */}
+			{activeCard && (
+			<div className="bg-background/90 backdrop-blur-xl border border-border/80 rounded-2xl shadow-sm relative z-10">
+				<div className="p-6 border-b border-border/60 space-y-4 relative z-20">
 					<div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
 						<div>
 							<h2 className="text-lg font-extrabold text-primary tracking-tight">
@@ -650,21 +558,62 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 										</button>
 									))}
 								</div>
-								<select
-									value={eventFilter}
-									onChange={(e) => setEventFilter(e.target.value)}
-									className="px-3 py-2 bg-slate-100/90 text-primary font-bold text-xs border border-outline-variant/40 rounded-xl outline-none cursor-pointer"
-								>
-									<option value="ALL">All Events</option>
-									<option value="login">User Login</option>
-									<option value="logoff">User Logoff</option>
-									<option value="lock">Screen Locked</option>
-									<option value="unlock">Screen Unlocked</option>
-									<option value="sleep">Device Sleep</option>
-									<option value="wake">Device Woke</option>
-									<option value="device_on">Device On</option>
-									<option value="shutdown">Device Shutdown</option>
-								</select>
+								{(() => {
+									const selectedOption = EVENT_FILTER_OPTIONS.find((o) => o.id === eventFilter) || EVENT_FILTER_OPTIONS[0];
+									const SelectedIcon = selectedOption.icon;
+									return (
+										<div className="relative shrink-0" ref={eventDropdownRef}>
+											<button
+												type="button"
+												onClick={() => setIsEventDropdownOpen((prev) => !prev)}
+												className="px-3.5 py-2 bg-slate-100/90 text-primary font-bold text-xs border border-outline-variant/40 rounded-xl outline-none cursor-pointer flex items-center gap-2 hover:bg-slate-200/70 transition-all shadow-xs min-w-[155px] justify-between"
+											>
+												<span className="flex items-center gap-2">
+													<span className={`w-2 h-2 rounded-full ${selectedOption.dot} shrink-0`} />
+													<SelectedIcon size={13} className="text-muted-foreground shrink-0" />
+													<span>{selectedOption.label}</span>
+												</span>
+												<ChevronDown
+													size={14}
+													className={`transition-transform duration-200 text-muted-foreground shrink-0 ${
+														isEventDropdownOpen ? 'rotate-180 text-accent' : ''
+													}`}
+												/>
+											</button>
+
+											{isEventDropdownOpen && (
+												<div className="absolute right-0 top-full mt-2 w-56 bg-background/95 backdrop-blur-2xl border border-border/90 rounded-2xl p-1.5 shadow-2xl z-50 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
+													{EVENT_FILTER_OPTIONS.map((option) => {
+														const isSelected = eventFilter === option.id;
+														const OptIcon = option.icon;
+														return (
+															<button
+																key={option.id}
+																type="button"
+																onClick={() => {
+																	setEventFilter(option.id);
+																	setIsEventDropdownOpen(false);
+																}}
+																className={`w-full px-3 py-2 rounded-xl text-xs flex items-center justify-between cursor-pointer select-none transition-colors ${
+																	isSelected
+																		? 'bg-primary/10 text-primary font-bold'
+																		: 'text-muted-foreground font-semibold hover:bg-slate-100 hover:text-primary'
+																}`}
+															>
+																<span className="flex items-center gap-2.5">
+																	<span className={`w-2 h-2 rounded-full ${option.dot} shrink-0`} />
+																	<OptIcon size={13} className={isSelected ? 'text-primary' : 'text-muted-foreground'} />
+																	<span>{option.label}</span>
+																</span>
+																{isSelected && <Check size={14} className="text-accent shrink-0" />}
+															</button>
+														);
+													})}
+												</div>
+											)}
+										</div>
+									);
+								})()}
 							</div>
 						) : (
 							<div className="flex items-center gap-1 bg-slate-100/90 border border-outline-variant/40 rounded-xl p-1 shrink-0">
@@ -858,6 +807,7 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 					</div>
 				</div>
 			</div>
+			)}
 		</div>
 	);
 }

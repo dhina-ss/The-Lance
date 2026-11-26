@@ -12,7 +12,6 @@ import {
 	ChevronRight,
 	Activity,
 	Sliders,
-	FileText,
 } from 'lucide-react';
 import { getStoredTenantRoles, ALL_SUBRULE_IDS } from './tenantRoles';
 
@@ -25,18 +24,9 @@ const defaultNavItems = [
 		subItems: [
 			{ id: 'devices-monitor', label: 'Monitor', icon: Activity },
 			{ id: 'devices-control', label: 'Control', icon: Sliders },
-			{ id: 'devices-report', label: 'Report', icon: FileText },
 		],
 	},
-	{
-		id: 'users',
-		label: 'Users',
-		icon: Users,
-		subItems: [
-			{ id: 'users-logs', label: 'Logs', icon: FileText },
-			{ id: 'users-report', label: 'Report', icon: BarChart3 },
-		],
-	},
+	{ id: 'users', label: 'Users', icon: Users },
 	{ id: 'alerts', label: 'Alerts', icon: Bell },
 	{ id: 'reports', label: 'Reports', icon: BarChart3 },
 	{ id: 'settings', label: 'Settings', icon: Settings },
@@ -109,31 +99,15 @@ export default function Sidebar({ activeTab: externalActiveTab, setActiveTab: ex
 					r === 'security:antivirus_threat'
 				);
 
-			case 'devices-report':
-				return rules.some((r) =>
-					r === 'software_mgmt' ||
-					r === 'software:installed_apps' ||
-					r === 'software:remote_push'
-				);
-
 			case 'devices':
 				return (
 					isItemAllowed('devices-monitor') ||
-					isItemAllowed('devices-control') ||
-					isItemAllowed('devices-report')
+					isItemAllowed('devices-control')
 				);
-
-			case 'users-logs':
-				return rules.some((r) => r === 'user_auditing' || r === 'users:user_logs');
-
-			case 'users-report':
-				return rules.some((r) => r === 'user_auditing' || r === 'users:user_logs');
 
 			case 'users':
-				return (
-					isItemAllowed('users-logs') ||
-					isItemAllowed('users-report')
-				);
+			case 'users-logs':
+				return rules.some((r) => r === 'user_auditing' || r === 'users:user_logs');
 
 			case 'alerts':
 				return rules.some((r) =>
@@ -175,15 +149,12 @@ export default function Sidebar({ activeTab: externalActiveTab, setActiveTab: ex
 
 	const [openSubmenu, setOpenSubmenu] = useState(() => {
 		if (activeTab.startsWith('devices')) return 'devices';
-		if (activeTab.startsWith('users')) return 'users';
 		return null;
 	});
 
 	useEffect(() => {
 		if (activeTab.startsWith('devices')) {
 			setOpenSubmenu('devices');
-		} else if (activeTab.startsWith('users')) {
-			setOpenSubmenu('users');
 		}
 	}, [activeTab]);
 
