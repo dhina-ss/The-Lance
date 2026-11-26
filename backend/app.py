@@ -1023,9 +1023,9 @@ _SERVER_STARTED_AT = _dt.datetime.now(_dt.timezone.utc)
 LOCATION_REFRESH_SECONDS = 3600  # Re-check location once every 1 hour
 
 
-# A heartbeat gap at least this long means the device was powered off / offline
-# in between (with a 5s heartbeat this is ~24 missed beats, so not a blip).
-SHUTDOWN_GAP_SECONDS = 120
+# A heartbeat gap at least this long means the device went offline / powered off
+# or slept (detected every 1 minute).
+SHUTDOWN_GAP_SECONDS = 60
 
 
 def _human_duration(seconds):
@@ -1164,13 +1164,15 @@ LOCK_FRESH_SECONDS = 45
 
 
 def compute_status(last_heartbeat, suspended_at, locked_at=None):
-    """Online if a heartbeat arrived < 3 min ago; Sleep if the screen is auto-
+    """Online if a heartbeat arrived < 1 min ago; Sleep if the screen is auto-
     locked or the device is suspended; else Offline."""
     import datetime
     now = datetime.datetime.now(datetime.timezone.utc)
+    if suspended_at is not None and (last_heartbeat is None or suspended_at >= last_heartbeat):
+        return 'Sleep'
     if last_heartbeat is not None:
         try:
-            if (now - last_heartbeat).total_seconds() < 180:
+            if (now - last_heartbeat).total_seconds() < SHUTDOWN_GAP_SECONDS:
                 # On and heartbeating - but an auto-locked screen shows as Sleep.
                 if locked_at is not None:
                     try:
@@ -1184,6 +1186,64 @@ def compute_status(last_heartbeat, suspended_at, locked_at=None):
     if suspended_at is not None:
         return 'Sleep'
     return 'Offline'
+
+
+_last_status_sweep_ts = 0.0
+_status_sweep_lock = None
+
+
+def sweep_stale_device_statuses(cur=None, force=False):
+    """Record 'shutdown' within 1 minute for devices whose heartbeats stopped
+    and are not marked suspended (sleep). Safe to call from both the 60s
+    background monitor and API reads (throttled every 45s unless forced)."""
+    global _last_status_sweep_ts
+    now_mono = time.monotonic()
+    if not force and (now_mono - _last_status_sweep_ts) < 45:
+        return
+    _last_status_sweep_ts = now_mono
+
+    own_conn = None
+    try:
+        if cur is None:
+            own_conn = get_db_connection()
+            cur = own_conn.cursor()
+
+        cur.execute("SELECT to_regclass('public.device_session_events');")
+        if cur.fetchone()[0] is None:
+            if own_conn is not None:
+                cur.close()
+                own_conn.close()
+            return
+
+        cur.execute("""
+            INSERT INTO device_session_events (device_id, event_type, detail, occurred_at)
+            SELECT d."DeviceId", 'shutdown', 'Device powered off / offline (> 1m)', d."LastHeartbeatTime"
+            FROM devices d
+            WHERE d."LastHeartbeatTime" IS NOT NULL
+              AND d."LastHeartbeatTime" < CURRENT_TIMESTAMP - INTERVAL '60 seconds'
+              AND d."SuspendedAt" IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM device_session_events e
+                  WHERE e.device_id = d."DeviceId"
+                    AND e.event_type = 'shutdown'
+                    AND e.occurred_at >= d."LastHeartbeatTime" - INTERVAL '60 seconds'
+              );
+        """)
+        if own_conn is not None:
+            own_conn.commit()
+    except Exception:
+        if own_conn is not None:
+            try:
+                own_conn.rollback()
+            except Exception:
+                pass
+    finally:
+        if own_conn is not None:
+            try:
+                cur.close()
+                own_conn.close()
+            except Exception:
+                pass
 
 # ── DEVICES API ENDPOINTS (NEON DB) ──
 @app.route('/api/devices/register', methods=['POST'])
@@ -1365,15 +1425,31 @@ def device_heartbeat():
         if _prev and _prev[0] is not None:
             gap = (now_utc - _prev[0]).total_seconds()
             was_suspended = _prev[1] is not None
-            if gap >= SHUTDOWN_GAP_SECONDS:
-                if was_suspended:
-                    record_session_event(cur, device_id, 'wake',
-                                         detail=f'Device woke from sleep (asleep for {_human_duration(gap)})')
+            if was_suspended:
+                sleep_dur = (now_utc - _prev[1]).total_seconds() if _prev[1] else gap
+                dur_label = _human_duration(max(gap, sleep_dur)) if max(gap, sleep_dur) >= 60 else f"{int(max(0, max(gap, sleep_dur)))}s"
+                record_session_event(cur, device_id, 'wake',
+                                     detail=f'Device woke from sleep (asleep for {dur_label})')
+            elif gap >= SHUTDOWN_GAP_SECONDS:
+                cur.execute(
+                    "SELECT id FROM device_session_events "
+                    "WHERE device_id=%s AND event_type='shutdown' "
+                    "  AND occurred_at >= %s - INTERVAL '60 seconds' "
+                    "  AND occurred_at <= %s + INTERVAL '60 seconds' "
+                    "ORDER BY occurred_at DESC LIMIT 1;",
+                    (device_id, _prev[0], _prev[0]),
+                )
+                existing_sd = cur.fetchone()
+                if existing_sd:
+                    cur.execute(
+                        "UPDATE device_session_events SET detail=%s WHERE id=%s;",
+                        (_human_duration(gap), existing_sd[0]),
+                    )
                 else:
                     record_session_event(cur, device_id, 'shutdown',
                                          detail=_human_duration(gap), occurred_at=_prev[0])
-                    record_session_event(cur, device_id, 'device_on',
-                                         detail=f'Device powered on (after {_human_duration(gap)} offline)')
+                record_session_event(cur, device_id, 'device_on',
+                                     detail=f'Device powered on (after {_human_duration(gap)} offline)')
         elif not _prev or _prev[0] is None:
             record_session_event(cur, device_id, 'device_on', detail='Endpoint powered on / online')
         cur.execute(
@@ -1629,6 +1705,9 @@ def report_session_event():
         if event_type == 'lock':
             cur.execute('UPDATE devices SET "LockedAt"=CURRENT_TIMESTAMP WHERE "DeviceId"=%s;', (device_id,))
         elif event_type in ('unlock', 'login'):
+            cur.execute('SELECT "SuspendedAt" FROM devices WHERE "DeviceId"=%s;', (device_id,))
+            susp_row = cur.fetchone()
+            was_suspended = bool(susp_row and susp_row[0] is not None)
             if detail:
                 cur.execute(
                     'UPDATE devices SET "LockedAt"=NULL, "SuspendedAt"=NULL, "Username"=%s WHERE "DeviceId"=%s;',
@@ -1639,6 +1718,9 @@ def report_session_event():
                     'UPDATE devices SET "LockedAt"=NULL, "SuspendedAt"=NULL WHERE "DeviceId"=%s;',
                     (device_id,),
                 )
+            if was_suspended:
+                record_session_event(cur, device_id, 'wake',
+                                     detail=f'Device woke up ({detail})' if detail else 'Device woke up')
         record_session_event(cur, device_id, event_type, detail=detail)
         conn.commit()
         cur.close()
@@ -2077,6 +2159,8 @@ def get_devices():
         import psycopg2.extras
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        sweep_stale_device_statuses(cur)
+        conn.commit()
         cur.execute("""
             SELECT d.*,
                    u."Username" AS "ActivatedByName",
@@ -2487,6 +2571,8 @@ def get_device_session_events(device_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+        sweep_stale_device_statuses(cur)
+        conn.commit()
         cur.execute("SELECT to_regclass('public.device_session_events');")
         if cur.fetchone()[0] is None:
             cur.close(); conn.close()
@@ -2508,6 +2594,8 @@ def get_user_session_events(user_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+        sweep_stale_device_statuses(cur)
+        conn.commit()
         cur.execute('SELECT "Id", "Username", "Email", "EmployeeCode", "DeviceId", "CreatedDate" FROM app_users WHERE "Id" = %s;', (user_id,))
         user_row = cur.fetchone()
         if not user_row:
@@ -3382,6 +3470,18 @@ def serve_frontend(path):
         "health": "/api/health",
         "products": "/api/products"
     }), 200
+
+def _start_status_monitor():
+    import threading
+    def _loop():
+        time.sleep(15)
+        while True:
+            sweep_stale_device_statuses(force=True)
+            time.sleep(60)
+    t = threading.Thread(target=_loop, daemon=True, name='device-status-monitor')
+    t.start()
+
+_start_status_monitor()
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

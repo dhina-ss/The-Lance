@@ -150,14 +150,18 @@ function getLogActionMeta(type, detail) {
 				dot: 'bg-blue-500',
 				desc: detail || 'Endpoint screen unlocked / session resumed',
 			};
-		case 'shutdown':
+		case 'shutdown': {
+			const isDurationOnly = detail && /^\d+[dhm](\s+\d+[hm])?$/i.test(detail.trim());
 			return {
 				action: 'Device Shutdown',
 				icon: Power,
 				color: 'text-rose-600 bg-rose-500/10 border-rose-500/20',
 				dot: 'bg-rose-500',
-				desc: detail ? `Session ended (gap: ${detail})` : 'Endpoint powered off / session terminated',
+				desc: detail
+					? (isDurationOnly ? `Session ended (gap: ${detail})` : detail)
+					: 'Endpoint powered off / session terminated',
 			};
+		}
 		case 'alert':
 			return {
 				action: 'Manager Inactivity Alert',
@@ -243,7 +247,7 @@ export default function UsersPage({ onNavigateToDevice, activeSubTab = 'users-lo
 		});
 	}, [logsByDate]);
 
-	// Fetch logs when inspectUser changes
+	// Fetch logs when inspectUser changes, and auto-refresh every 30s while open
 	useEffect(() => {
 		if (!inspectUser) {
 			setUserLogs([]);
@@ -251,36 +255,42 @@ export default function UsersPage({ onNavigateToDevice, activeSubTab = 'users-lo
 			return;
 		}
 		let mounted = true;
-		setLogsLoading(true);
-		fetchUserLogs(inspectUser.id, inspectUser.deviceId)
-			.then((logs) => {
-				if (!mounted) return;
-				const fetchedLogs = logs || [];
-				setUserLogs(fetchedLogs);
+		const loadLogs = (initial) => {
+			if (initial) setLogsLoading(true);
+			fetchUserLogs(inspectUser.id, inspectUser.deviceId)
+				.then((logs) => {
+					if (!mounted) return;
+					const fetchedLogs = logs || [];
+					setUserLogs(fetchedLogs);
 
-				const todayKey = getDateKey(new Date());
-				const hasToday = fetchedLogs.some((l) => getDateKey(l.at) === todayKey);
-				if (hasToday) {
-					setOpenDateKeys(new Set([todayKey]));
-				} else if (fetchedLogs.length > 0) {
-					// Default to newest date that has logs
-					const datesWithLogs = Array.from(
-						new Set(fetchedLogs.map((l) => getDateKey(l.at)).filter(Boolean))
-					).sort((a, b) => b.localeCompare(a));
-					setOpenDateKeys(new Set([datesWithLogs[0] || todayKey]));
-				} else {
-					setOpenDateKeys(new Set([todayKey]));
-				}
-			})
-			.catch(() => {
-				if (!mounted) return;
-				setUserLogs([]);
-			})
-			.finally(() => {
-				if (mounted) setLogsLoading(false);
-			});
+					if (initial) {
+						const todayKey = getDateKey(new Date());
+						const hasToday = fetchedLogs.some((l) => getDateKey(l.at) === todayKey);
+						if (hasToday) {
+							setOpenDateKeys(new Set([todayKey]));
+						} else if (fetchedLogs.length > 0) {
+							// Default to newest date that has logs
+							const datesWithLogs = Array.from(
+								new Set(fetchedLogs.map((l) => getDateKey(l.at)).filter(Boolean))
+							).sort((a, b) => b.localeCompare(a));
+							setOpenDateKeys(new Set([datesWithLogs[0] || todayKey]));
+						} else {
+							setOpenDateKeys(new Set([todayKey]));
+						}
+					}
+				})
+				.catch(() => {
+					if (mounted && initial) setUserLogs([]);
+				})
+				.finally(() => {
+					if (mounted && initial) setLogsLoading(false);
+				});
+		};
+		loadLogs(true);
+		const timer = setInterval(() => loadLogs(false), 30000);
 		return () => {
 			mounted = false;
+			clearInterval(timer);
 		};
 	}, [inspectUser]);
 
