@@ -105,8 +105,8 @@ export function mapDevice(d) {
     city: d.locationCity,
     region: d.locationRegion,
     country: d.locationCountry,
-    latitude: d.latitude,
-    longitude: d.longitude,
+    latitude: d.latitude != null ? Number(d.latitude) : null,
+    longitude: d.longitude != null ? Number(d.longitude) : null,
     locationLabel:
       [d.locationCity, d.locationRegion, d.locationCountry].filter(Boolean).join(', ') || null,
     locationSource: d.locationSource, // "GPS" | "IP" | null

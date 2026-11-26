@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import XLSX from 'xlsx-js-style';
+import DeviceLocationMap from './DeviceLocationMap';
 import {
 	fetchDevices,
 	fetchDeviceMetrics,
@@ -1283,17 +1284,24 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 													<Field label="Public IP" value={inspectDevice.publicIp || '—'} mono />
 													<Field label="Coordinates" value={`${inspectDevice.latitude.toFixed(4)}, ${inspectDevice.longitude.toFixed(4)}`} mono />
 													<Field label="Last Checked" value={inspectDevice.locationUpdatedAt ? relativeTime(inspectDevice.locationUpdatedAt) : '—'} />
-													<div className="col-span-2">
-														<span className="text-[11px] text-on-surface-variant block uppercase font-medium mb-0.5">Map</span>
-														<a href={`https://www.google.com/maps?q=${inspectDevice.latitude},${inspectDevice.longitude}`} target="_blank" rel="noreferrer" className="text-primary font-semibold text-[13px] hover:underline">Open in Google Maps</a>
+													<div className="col-span-2 flex items-center gap-4">
+														<div>
+															<span className="text-[11px] text-on-surface-variant block uppercase font-medium mb-0.5">External Maps</span>
+															<div className="flex items-center gap-3">
+																<a href={`https://www.google.com/maps?q=${inspectDevice.latitude},${inspectDevice.longitude}`} target="_blank" rel="noreferrer" className="text-primary font-semibold text-[13px] hover:underline">Google Maps</a>
+																<span className="text-outline-variant">·</span>
+																<a href={`https://www.openstreetmap.org/?mlat=${inspectDevice.latitude}&mlon=${inspectDevice.longitude}#map=14/${inspectDevice.latitude}/${inspectDevice.longitude}`} target="_blank" rel="noreferrer" className="text-primary font-semibold text-[13px] hover:underline">OpenStreetMap</a>
+															</div>
+														</div>
 													</div>
 												</div>
 												<div className="rounded-2xl overflow-hidden border border-outline-variant/40 h-56 bg-surface-container-high">
-													<iframe
-														title="Device location"
-														className="w-full h-full border-0"
-														loading="lazy"
-														src={`https://maps.google.com/maps?q=${inspectDevice.latitude},${inspectDevice.longitude}&z=13&output=embed`}
+													<DeviceLocationMap
+														latitude={inspectDevice.latitude}
+														longitude={inspectDevice.longitude}
+														label={[inspectDevice.city, inspectDevice.region].filter(Boolean).join(', ') || inspectDevice.name}
+														accuracyMeters={inspectDevice.gpsAccuracyMeters}
+														isGps={inspectDevice.locationSource === 'GPS'}
 													/>
 												</div>
 											</div>
