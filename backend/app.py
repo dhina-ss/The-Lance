@@ -1812,37 +1812,105 @@ def get_installer_info():
 @app.route('/api/installers', methods=['POST'])
 def upload_installer():
     """Super-admin: upload a new agent installer (.exe). Replaces the current
-    one so tenants always download the latest build."""
+    one so tenants always download the latest build. Streams through a temp
+    file to minimize RAM on constrained hosts (e.g. Render 512MB)."""
+    import gc
+    import tempfile
     import psycopg2
+    global _installer_meta_cache
     f = request.files.get('file')
     if not f:
         return jsonify({'message': 'A file is required.'}), 400
     filename = (f.filename or '').strip()
     if not filename.lower().endswith('.exe'):
         return jsonify({'message': 'The installer must be a .exe file.'}), 400
-    content = f.read()
-    if not content:
-        return jsonify({'message': 'The uploaded file is empty.'}), 400
     version = (request.form.get('version') or '').strip() or None
+
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix='upload_installer_', suffix='.exe')
+    os.close(tmp_fd)
     try:
+        f.save(tmp_path)
+        try:
+            f.stream.close()
+        except Exception:
+            pass
+
+        size_bytes = os.path.getsize(tmp_path)
+        if size_bytes == 0:
+            return jsonify({'message': 'The uploaded file is empty.'}), 400
+
+        h = hashlib.sha256()
+        with open(tmp_path, 'rb') as fp:
+            while True:
+                chunk = fp.read(1024 * 1024)
+                if not chunk:
+                    break
+                h.update(chunk)
+        sha256_hex = h.hexdigest()
+
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute('''CREATE TABLE IF NOT EXISTS app_installers (
           id serial PRIMARY KEY, file_name varchar(300), version varchar(50),
-          content bytea, size_bytes integer,
+          content bytea, size_bytes integer, sha256 varchar(64),
           uploaded_at timestamptz DEFAULT CURRENT_TIMESTAMP);''')
+        cur.execute('ALTER TABLE app_installers ADD COLUMN IF NOT EXISTS sha256 varchar(64);')
+        # Upload in 4 MB chunks into a temp table so psycopg2 never builds a
+        # 100+ MB hex query string in Python RAM (keeps Render < 512 MB).
+        cur.execute('CREATE TEMP TABLE _inst_chunks (idx integer PRIMARY KEY, chunk bytea) ON COMMIT DROP;')
+        CHUNK_SIZE = 4 * 1024 * 1024
+        idx = 0
+        with open(tmp_path, 'rb') as fp:
+            while True:
+                chunk = fp.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                cur.execute('INSERT INTO _inst_chunks (idx, chunk) VALUES (%s, %s);',
+                            (idx, psycopg2.Binary(chunk)))
+                del chunk
+                idx += 1
+
         cur.execute('DELETE FROM app_installers;')  # keep only the latest
-        cur.execute('INSERT INTO app_installers (file_name, version, content, size_bytes) '
-                    'VALUES (%s,%s,%s,%s);',
-                    ('TheLanceEMSSetup.exe', version, psycopg2.Binary(content), len(content)))
+        cur.execute(
+            "INSERT INTO app_installers (file_name, version, content, size_bytes, sha256) "
+            "SELECT %s, %s, string_agg(chunk, ''::bytea ORDER BY idx), %s, %s FROM _inst_chunks "
+            "RETURNING uploaded_at;",
+            ('TheLanceEMSSetup.exe', version, size_bytes, sha256_hex)
+        )
+        uploaded_at = cur.fetchone()[0]
         conn.commit()
         cur.close(); conn.close()
+
+        # Keep the verified disk copy so downloads need zero DB blob reads
+        cache_path = _installer_disk_path(f"{size_bytes}|{uploaded_at}")
+        try:
+            _cleanup_old_installer_files(keep_path=cache_path)
+            os.replace(tmp_path, cache_path)
+            tmp_path = None
+        except Exception:
+            pass
+
+        _installer_meta_cache = {
+            'key': f"{size_bytes}|{uploaded_at}",
+            'name': 'TheLanceEMSSetup.exe',
+            'version': version,
+            'sha256': sha256_hex,
+            'size_bytes': size_bytes,
+            'checked_at': time.time(),
+        }
+        gc.collect()
         return jsonify({'success': True, 'fileName': 'TheLanceEMSSetup.exe',
-                        'version': version, 'sizeBytes': len(content)}), 201
+                        'version': version, 'sizeBytes': size_bytes}), 201
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({'message': str(e)}), 500
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
 
 @app.route('/api/packages/<package_id>/content', methods=['GET'])
@@ -2919,46 +2987,77 @@ def verify_license_download():
         traceback.print_exc()
         return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
 
-_installer_cache = {'key': None, 'name': None, 'data': None, 'sha256': None, 'version': None}
+_installer_meta_cache = {'checked_at': 0.0, 'key': None, 'name': None, 'version': None, 'sha256': None, 'size_bytes': None}
+
+
+def _installer_disk_path(key):
+    import tempfile
+    safe = hashlib.sha256((key or 'default').encode('utf-8')).hexdigest()[:16]
+    return os.path.join(tempfile.gettempdir(), f"thelance_installer_{safe}.exe")
+
+
+def _cleanup_old_installer_files(keep_path=None):
+    import glob, tempfile
+    pattern = os.path.join(tempfile.gettempdir(), 'thelance_installer_*.exe')
+    for p in glob.glob(pattern):
+        if keep_path and os.path.abspath(p) == os.path.abspath(keep_path):
+            continue
+        try:
+            os.remove(p)
+        except Exception:
+            pass
 
 
 def get_latest_installer_metadata(cur):
-    """Lightweight metadata lookup for heartbeat auto-update checks."""
-    global _installer_cache
+    """Lightweight metadata lookup for heartbeat auto-update checks.
+    Never loads the 53 MB installer binary into Python memory."""
+    global _installer_meta_cache
+    now = time.time()
+    if now - _installer_meta_cache.get('checked_at', 0.0) < 15:
+        if _installer_meta_cache.get('version'):
+            return {
+                'version': _installer_meta_cache['version'],
+                'downloadUrl': '/api/installers/latest/download',
+                'sha256': _installer_meta_cache.get('sha256'),
+            }
+        return {}
+
     try:
         cur.execute("SELECT to_regclass('public.app_installers');")
         if cur.fetchone()[0] is None:
+            _installer_meta_cache = {'checked_at': now, 'key': None, 'name': None, 'version': None, 'sha256': None, 'size_bytes': None}
             return {}
-        cur.execute('SELECT file_name, version, size_bytes, uploaded_at '
+        cur.execute('ALTER TABLE app_installers ADD COLUMN IF NOT EXISTS sha256 varchar(64);')
+        cur.execute('SELECT id, file_name, version, size_bytes, uploaded_at, sha256 '
                     'FROM app_installers ORDER BY uploaded_at DESC LIMIT 1;')
         meta = cur.fetchone()
-        if not meta or not meta[1]:
+        if not meta or not meta[2]:
+            _installer_meta_cache = {'checked_at': now, 'key': None, 'name': None, 'version': None, 'sha256': None, 'size_bytes': None}
             return {}
-        key = f"{meta[2]}|{meta[3]}"
-        if _installer_cache.get('key') == key and _installer_cache.get('sha256'):
-            return {
-                'version': meta[1],
-                'downloadUrl': '/api/installers/latest/download',
-                'sha256': _installer_cache['sha256'],
-            }
-        # Only compute sha256 once when cache key changes
-        cur.execute('SELECT content FROM app_installers ORDER BY uploaded_at DESC LIMIT 1;')
-        row = cur.fetchone()
-        if row and row[0] is not None:
-            data = bytes(row[0])
-            digest = hashlib.sha256(data).hexdigest()
-            _installer_cache = {
-                'key': key,
-                'name': meta[0] or 'TheLanceEMSSetup.exe',
-                'data': data,
-                'sha256': digest,
-                'version': meta[1],
-            }
-            return {
-                'version': meta[1],
-                'downloadUrl': '/api/installers/latest/download',
-                'sha256': digest,
-            }
+
+        digest = meta[5]
+        if not digest:
+            # Compute SHA-256 server-side inside PostgreSQL (transfers 64 bytes instead of 53 MB)
+            cur.execute('SELECT encode(sha256(content), \'hex\') FROM app_installers WHERE id=%s;', (meta[0],))
+            srow = cur.fetchone()
+            digest = srow[0] if srow else None
+            if digest:
+                cur.execute('UPDATE app_installers SET sha256=%s WHERE id=%s;', (digest, meta[0]))
+
+        key = f"{meta[3]}|{meta[4]}"
+        _installer_meta_cache = {
+            'checked_at': now,
+            'key': key,
+            'name': meta[1] or 'TheLanceEMSSetup.exe',
+            'version': meta[2],
+            'sha256': digest,
+            'size_bytes': meta[3],
+        }
+        return {
+            'version': meta[2],
+            'downloadUrl': '/api/installers/latest/download',
+            'sha256': digest,
+        }
     except Exception as e:
         print(f"Installer metadata lookup failed: {e}")
     return {}
@@ -2966,54 +3065,67 @@ def get_latest_installer_metadata(cur):
 
 @app.route('/api/installers/latest/download', methods=['GET'])
 def download_latest_installer_for_agent():
-    """Agent auto-update endpoint: streams the latest installer .exe."""
+    """Agent auto-update endpoint: streams the latest installer .exe from disk."""
     from flask import send_file
-    import io
-    name, data = get_installer_bytes()
-    if data is None:
+    name, exe_path = get_installer_path()
+    if not exe_path:
         return jsonify({'error': 'No installer available'}), 404
-    return send_file(io.BytesIO(data), as_attachment=True, download_name=name or 'TheLanceEMSSetup.exe')
+    return send_file(exe_path, as_attachment=True, download_name=name or 'TheLanceEMSSetup.exe')
 
 
-def get_installer_bytes():
-    """Returns (filename, bytes) for the agent installer to bundle in the
-    download zip. The DB (app_installers) is the source of truth in production
-    (Render has no persistent disk), with the local build output as a dev
-    fallback. Returns (None, None) if no installer is available.
-
-    The 53 MB blob is cached in process memory keyed by (size, uploaded_at):
-    each download then does only a tiny metadata query instead of re-reading
-    the whole file from Neon, which is the main cost of a warm download. A new
-    upload changes the key and invalidates the cache automatically."""
-    global _installer_cache
-    # 1) Database (production).
+def get_installer_path():
+    """Returns (filename, file_path) for the agent installer without caching 53 MB
+    blobs permanently in Python RAM. Uses Neon DB (app_installers) materialized to
+    /tmp disk, falling back to local dev build output."""
+    import gc
+    global _installer_meta_cache
+    # 1) Database (production) materialized to /tmp.
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT to_regclass('public.app_installers');")
         if cur.fetchone()[0] is not None:
-            cur.execute('SELECT file_name, size_bytes, uploaded_at, version '
+            cur.execute('SELECT id, file_name, size_bytes, uploaded_at, version '
                         'FROM app_installers ORDER BY uploaded_at DESC LIMIT 1;')
             meta = cur.fetchone()
             if meta:
-                key = f"{meta[1]}|{meta[2]}"
-                if _installer_cache['key'] == key and _installer_cache['data'] is not None:
+                inst_id, name, size_bytes, uploaded_at, version = meta
+                name = name or 'TheLanceEMSSetup.exe'
+                key = f"{size_bytes}|{uploaded_at}"
+                disk_path = _installer_disk_path(key)
+                if os.path.isfile(disk_path) and os.path.getsize(disk_path) == size_bytes:
                     cur.close(); conn.close()
-                    return (_installer_cache['name'], _installer_cache['data'])
-                cur.execute('SELECT content FROM app_installers ORDER BY uploaded_at DESC LIMIT 1;')
-                row = cur.fetchone()
-                if row and row[0] is not None:
-                    name = meta[0] or 'TheLanceEMSSetup.exe'
-                    data = bytes(row[0])
-                    _installer_cache = {
-                        'key': key,
-                        'name': name,
-                        'data': data,
-                        'sha256': hashlib.sha256(data).hexdigest(),
-                        'version': meta[3],
-                    }
-                    cur.close(); conn.close()
-                    return (name, data)
+                    return (name, disk_path)
+
+                # Stream out in 4 MB chunks via PostgreSQL substring() so Python RAM stays tiny
+                import threading
+                _cleanup_old_installer_files(keep_path=disk_path)
+                tmp_write = f"{disk_path}.{threading.get_ident()}.tmp"
+                CHUNK_SIZE = 4 * 1024 * 1024
+                offset = 1  # PostgreSQL substring(bytea from ... for ...) is 1-based
+                with open(tmp_write, 'wb') as fp:
+                    while True:
+                        cur.execute('SELECT substring(content from %s for %s) FROM app_installers WHERE id=%s;',
+                                    (offset, CHUNK_SIZE, inst_id))
+                        row = cur.fetchone()
+                        if not row or not row[0]:
+                            break
+                        chunk_bytes = bytes(row[0])
+                        if not chunk_bytes:
+                            break
+                        fp.write(chunk_bytes)
+                        offset += len(chunk_bytes)
+                        del row, chunk_bytes
+                cur.close(); conn.close()
+                if os.path.isfile(tmp_write) and os.path.getsize(tmp_write) > 0:
+                    os.replace(tmp_write, disk_path)
+                    gc.collect()
+                    return (name, disk_path)
+                try:
+                    os.remove(tmp_write)
+                except Exception:
+                    pass
+                return (None, None)
         cur.close(); conn.close()
     except Exception as e:
         print(f"Installer DB lookup failed: {e}")
@@ -3028,8 +3140,7 @@ def get_installer_bytes():
     candidates = [c for c in candidates if os.path.isfile(c)]
     if candidates:
         path = max(candidates, key=os.path.getmtime)
-        with open(path, 'rb') as f:
-            return ('TheLanceEMSSetup.exe', f.read())
+        return ('TheLanceEMSSetup.exe', path)
     return (None, None)
 
 
@@ -3046,10 +3157,10 @@ def download_product_file():
         e-mail (so the dashboard Download button needs no key input).
     """
     try:
-        import io
         import re
+        import tempfile
         import zipfile
-        from flask import send_file
+        from flask import Response, stream_with_context
 
         license_key = (request.args.get('licenseKey') or '').strip()
         tenant_name = None
@@ -3099,8 +3210,8 @@ def download_product_file():
                     'error': 'No license is linked to your account. Contact your administrator.'
                 }), 403
 
-        installer_name, installer_bytes = get_installer_bytes()
-        if not installer_bytes:
+        installer_name, installer_path = get_installer_path()
+        if not installer_path:
             return jsonify({
                 'error': 'The installer is not available yet. Please contact your administrator.'
             }), 503
@@ -3117,22 +3228,38 @@ def download_product_file():
             f"License key: {license_key}\n"
         )
 
-        buffer = io.BytesIO()
-        # The .exe is already a packed binary, so DEFLATE buys ~1% for a lot of
-        # CPU; store it uncompressed (much faster) and only deflate the tiny
-        # text files.
-        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as zf:
-            zf.writestr('TheLanceEMSSetup.exe', installer_bytes)
-            zf.writestr('license.key', license_key + '\n')
-            zf.writestr('README.txt', readme)
-        buffer.seek(0)
+        # Build the ZIP in a temp file on disk so we never hold 53+ MB in RAM
+        zip_fd, zip_path = tempfile.mkstemp(prefix='thelance_bundle_', suffix='.zip')
+        os.close(zip_fd)
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zf:
+            zf.write(installer_path, 'TheLanceEMSSetup.exe')
+            zf.writestr('license.key', license_key + '\n', compress_type=zipfile.ZIP_DEFLATED)
+            zf.writestr('README.txt', readme, compress_type=zipfile.ZIP_DEFLATED)
 
+        zip_size = os.path.getsize(zip_path)
         slug = re.sub(r'[^A-Za-z0-9]+', '-', (tenant_name or 'TheLance')).strip('-') or 'TheLance'
-        return send_file(
-            buffer,
-            as_attachment=True,
-            download_name=f'{slug}-TheLanceEndpoint.zip',
-            mimetype='application/zip'
+
+        def generate():
+            try:
+                with open(zip_path, 'rb') as fp:
+                    while True:
+                        chunk = fp.read(256 * 1024)
+                        if not chunk:
+                            break
+                        yield chunk
+            finally:
+                try:
+                    os.remove(zip_path)
+                except Exception:
+                    pass
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype='application/zip',
+            headers={
+                'Content-Disposition': f'attachment; filename="{slug}-TheLanceEndpoint.zip"',
+                'Content-Length': str(zip_size),
+            },
         )
     except Exception as e:
         import traceback
