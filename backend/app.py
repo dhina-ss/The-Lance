@@ -914,61 +914,112 @@ COUNTRY_CODE_NAMES = {
 }
 
 
+_ip_geo_cache = {}  # ip -> (expires_at, (city, region, country, lat, lon))
+
+
+def _valid_public_ip(candidate):
+    import ipaddress
+    if not candidate:
+        return None
+    try:
+        ip = ipaddress.ip_address(str(candidate).strip())
+        if not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast):
+            return str(ip)
+    except ValueError:
+        pass
+    return None
+
+
 def ip_geolocate(ip):
     """Public IP -> (city, region, country, lat, lon).
-    Tries ipinfo.io first (better regional city precision on Indian/Asian ISPs),
-    then falls back to ipwho.is and ip-api.com."""
+    Tries api.ip.sb first (accurate city resolution for Indian ISPs like Airtel),
+    then falls back to ipinfo.io, ipwho.is, and ip-api.com. Caches per IP for 30 min."""
     import urllib.request
     if not ip:
         return None, None, None, None, None
 
-    # 1) ipinfo.io (HTTPS)
-    try:
-        url = f'https://ipinfo.io/{ip}/json'
-        req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            data = json.loads(resp.read().decode())
-        loc_str = data.get('loc') or ''
-        lat = lon = None
-        if ',' in loc_str:
-            parts = loc_str.split(',', 1)
-            try:
-                lat, lon = float(parts[0]), float(parts[1])
-            except ValueError:
-                lat = lon = None
-        country_raw = (data.get('country') or '').strip()
-        country = COUNTRY_CODE_NAMES.get(country_raw.upper(), country_raw) if country_raw else None
-        if data.get('city') or lat is not None:
-            return data.get('city'), data.get('region'), country, lat, lon
-    except Exception as e:
-        print(f'ip_geolocate ipinfo.io failed: {e}')
+    now_ts = time.time()
+    cached = _ip_geo_cache.get(ip)
+    if cached and cached[0] > now_ts:
+        return cached[1]
 
-    # 2) Fallback: ipwho.is (HTTPS, no key required)
-    try:
-        url = f'https://ipwho.is/{ip}'
-        req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            data = json.loads(resp.read().decode())
-        if data.get('success'):
-            return (data.get('city'), data.get('region'), data.get('country'),
-                    data.get('latitude'), data.get('longitude'))
-    except Exception as e:
-        print(f'ip_geolocate ipwho.is failed: {e}')
+    result = None
 
-    # 3) Fallback: ip-api.com (HTTP only)
+    # 1) api.ip.sb (HTTPS, MaxMind-backed city resolution)
     try:
-        url = f'http://ip-api.com/json/{ip}?fields=status,city,regionName,country,lat,lon'
+        url = f'https://api.ip.sb/geoip/{ip}'
         req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
         with urllib.request.urlopen(req, timeout=6) as resp:
             data = json.loads(resp.read().decode())
-        if data.get('status') == 'success':
-            return (data.get('city'), data.get('regionName'), data.get('country'),
-                    data.get('lat'), data.get('lon'))
+        if data.get('city') or data.get('latitude') is not None:
+            result = (
+                data.get('city'),
+                data.get('region'),
+                data.get('country'),
+                data.get('latitude'),
+                data.get('longitude'),
+            )
     except Exception as e:
-        print(f'ip_geolocate ip-api failed: {e}')
+        print(f'ip_geolocate api.ip.sb failed: {e}')
+
+    # 2) Fallback: ipinfo.io (HTTPS)
+    if not result:
+        try:
+            url = f'https://ipinfo.io/{ip}/json'
+            req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read().decode())
+            loc_str = data.get('loc') or ''
+            lat = lon = None
+            if ',' in loc_str:
+                parts = loc_str.split(',', 1)
+                try:
+                    lat, lon = float(parts[0]), float(parts[1])
+                except ValueError:
+                    lat = lon = None
+            country_raw = (data.get('country') or '').strip()
+            country = COUNTRY_CODE_NAMES.get(country_raw.upper(), country_raw) if country_raw else None
+            if data.get('city') or lat is not None:
+                result = (data.get('city'), data.get('region'), country, lat, lon)
+        except Exception as e:
+            print(f'ip_geolocate ipinfo.io failed: {e}')
+
+    # 3) Fallback: ipwho.is (HTTPS, no key required)
+    if not result:
+        try:
+            url = f'https://ipwho.is/{ip}'
+            req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read().decode())
+            if data.get('success'):
+                result = (data.get('city'), data.get('region'), data.get('country'),
+                          data.get('latitude'), data.get('longitude'))
+        except Exception as e:
+            print(f'ip_geolocate ipwho.is failed: {e}')
+
+    # 4) Fallback: ip-api.com (HTTP only)
+    if not result:
+        try:
+            url = f'http://ip-api.com/json/{ip}?fields=status,city,regionName,country,lat,lon'
+            req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read().decode())
+            if data.get('status') == 'success':
+                result = (data.get('city'), data.get('regionName'), data.get('country'),
+                          data.get('lat'), data.get('lon'))
+        except Exception as e:
+            print(f'ip_geolocate ip-api failed: {e}')
+
+    if result:
+        if len(_ip_geo_cache) > 1000:
+            _ip_geo_cache.clear()
+        _ip_geo_cache[ip] = (now_ts + 1800, result)
+        return result
     return None, None, None, None, None
 
 
+import datetime as _dt
+_SERVER_STARTED_AT = _dt.datetime.now(_dt.timezone.utc)
 LOCATION_REFRESH_SECONDS = 3600  # Re-check location once every 1 hour
 
 
@@ -1290,7 +1341,7 @@ def device_heartbeat():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        public_ip = client_public_ip()
+        public_ip = client_public_ip() or _valid_public_ip(data.get('publicIpAddress'))
         # Detect a power-off / offline gap or wake from sleep:
         # If the device was suspended, log the wake event.
         # If it was shut down/offline, log the shutdown at the moment it went offline
@@ -1329,8 +1380,10 @@ def device_heartbeat():
             (data.get('ipAddress'), data.get('username'), public_ip, device_id))
 
         # City/region/country/lat/lon from the public IP: update when the public IP
-        # changed, when IP location hasn't been resolved yet, or every 1 hour.
+        # changed, when IP location hasn't been resolved yet, once after server
+        # restart/deploy (for IP-only devices), or every 1 hour.
         loc_stale = (prev_loc_updated is None or
+                     (gps_lat is None and prev_loc_updated < _SERVER_STARTED_AT) or
                      (now_utc - prev_loc_updated).total_seconds() >= LOCATION_REFRESH_SECONDS)
         if public_ip and (public_ip != prev_public_ip or not prev_loc_city or prev_lat is None or loc_stale):
             gcity, gregion, gcountry, glat, glon = ip_geolocate(public_ip)
