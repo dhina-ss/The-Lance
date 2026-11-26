@@ -145,7 +145,10 @@ export default function Sidebar({ activeTab: externalActiveTab, setActiveTab: ex
 				return rules.some((r) =>
 					r === 'telemetry_monitoring' ||
 					r === 'software_mgmt' ||
-					r === 'user_auditing'
+					r === 'user_auditing' ||
+					r === 'users:user_logs' ||
+					r.startsWith('device:') ||
+					r.startsWith('software:')
 				);
 
 			case 'settings':

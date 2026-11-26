@@ -429,6 +429,39 @@ export async function fetchUserLogs(userId, deviceId) {
   return [];
 }
 
+export async function fetchAllUserLogs(days = 30, limit = 500) {
+  try {
+    const data = await getJson(`/api/reports/user-logs?days=${encodeURIComponent(days)}&limit=${encodeURIComponent(limit)}`);
+    if (Array.isArray(data)) return data;
+  } catch {
+    // Fallback if backend route is deploying: stitch from users list
+  }
+  try {
+    const users = await fetchUsers();
+    const withDevices = (users || []).filter((u) => u.DeviceId || u.deviceId).slice(0, 20);
+    const perUser = await Promise.all(
+      withDevices.map(async (u) => {
+        const logs = await fetchUserLogs(u.Id ?? u.id, u.DeviceId ?? u.deviceId).catch(() => []);
+        return (logs || []).map((l, idx) => ({
+          id: `${u.Id ?? u.id}-${idx}`,
+          deviceId: u.DeviceId ?? u.deviceId,
+          deviceName: u.DeviceName ?? u.deviceName ?? '—',
+          userId: u.Id ?? u.id,
+          userName: u.Username ?? u.username ?? u.name,
+          userEmail: u.Email ?? u.email,
+          empCode: u.EmployeeCode ?? u.employeeCode ?? u.empCode,
+          type: l.type,
+          detail: l.detail,
+          at: l.at,
+        }));
+      }),
+    );
+    return perUser.flat().sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0));
+  } catch {
+    return [];
+  }
+}
+
 // ---------- license verification & product download ----------
 
 export async function verifyLicenseKey(licenseKey) {

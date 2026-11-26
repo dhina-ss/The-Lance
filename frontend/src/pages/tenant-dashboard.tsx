@@ -14,6 +14,7 @@ import AntivirusStatus from '../components/tenant/AntivirusStatus';
 import DevicesPage from '../components/tenant/DevicesPage';
 import UsersPage from '../components/tenant/UsersPage';
 import SettingsPage from '../components/tenant/SettingsPage';
+import ReportsPage from '../components/tenant/ReportsPage';
 import { fetchDevices, fetchOverview } from '../api/ems';
 import { API_BASE, getAuthHeaders } from '../api/client';
 import { Sparkles, Clock, AlertTriangle, FileBarChart, Settings as SettingsIcon } from 'lucide-react';
@@ -226,7 +227,11 @@ export default function TenantDashboardPage() {
 						<div className="relative z-10">
 							<SettingsPage />
 						</div>
-					) : activeTab === 'alerts' || activeTab === 'reports' ? (
+					) : activeTab === 'reports' ? (
+						<div className="relative z-10">
+							<ReportsPage onNavigateTab={setActiveTab} onNavigateToDevice={handleNavigateToDevice} />
+						</div>
+					) : activeTab === 'alerts' ? (
 						<ComingSoonView tab={activeTab} title={titleMap[activeTab] || 'Feature'} />
 					) : activeTab !== 'dashboard' ? (
 						<FeatureModuleView moduleId={activeTab} />
@@ -277,7 +282,7 @@ export default function TenantDashboardPage() {
 										icon="cloud_off"
 										iconBgColor="bg-rose-500/10"
 										iconTextColor="text-rose-500"
-										trendValue="> 3m idle"
+										trendValue="> 5m shutdown"
 										trendIsUp={false}
 										trendColor="text-rose-600"
 										trendBg="bg-rose-50"

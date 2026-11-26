@@ -2673,7 +2673,7 @@ def get_user_session_events(user_id):
         created_date = user_row[5]
 
         if not device_id:
-            cur.execute('SELECT "DeviceId" FROM devices WHERE "ActivatedByUserId"=%s LIMIT 1;', (user_id,))
+            cur.execute('SELECT "DeviceId" FROM devices WHERE "ActivatedByUserId"=%s LIMIT 1;', (str(user_id),))
             d_row = cur.fetchone()
             if d_row:
                 device_id = d_row[0]
@@ -2699,6 +2699,65 @@ def get_user_session_events(user_id):
         cur.close()
         conn.close()
         return jsonify(events), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/reports/user-logs', methods=['GET'])
+def get_all_user_logs_report():
+    """Unified session & activity logs across all users/devices (default last 30 days)."""
+    try:
+        days = max(1, min(90, int(request.args.get('days', 30) or 30)))
+        limit = max(1, min(2000, int(request.args.get('limit', 500) or 500)))
+        conn = get_db_connection()
+        cur = conn.cursor()
+        sweep_stale_device_statuses(cur)
+        conn.commit()
+        cur.execute("SELECT to_regclass('public.device_session_events');")
+        if cur.fetchone()[0] is None:
+            cur.close()
+            conn.close()
+            return jsonify([]), 200
+
+        cur.execute("""
+            SELECT e.id, e.device_id, e.event_type, e.detail, e.occurred_at,
+                   d."DeviceName", d."Username" AS os_username,
+                   u."Id" AS user_id, u."Username" AS user_name,
+                   u."Email" AS user_email, u."EmployeeCode" AS emp_code
+            FROM device_session_events e
+            LEFT JOIN devices d ON d."DeviceId" = e.device_id
+            LEFT JOIN LATERAL (
+                SELECT "Id", "Username", "Email", "EmployeeCode"
+                FROM app_users
+                WHERE "Id"::text = d."ActivatedByUserId" OR "DeviceId" = e.device_id
+                ORDER BY CASE WHEN "Id"::text = d."ActivatedByUserId" THEN 0 ELSE 1 END
+                LIMIT 1
+            ) u ON true
+            WHERE e.occurred_at >= CURRENT_TIMESTAMP - (%s || ' days')::interval
+            ORDER BY e.occurred_at DESC, e.id DESC
+            LIMIT %s;
+        """, (str(days), limit))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify([
+            {
+                'id': r[0],
+                'deviceId': r[1],
+                'type': r[2],
+                'detail': r[3],
+                'at': to_iso(r[4]),
+                'deviceName': r[5],
+                'osUsername': r[6],
+                'userId': r[7],
+                'userName': r[8],
+                'userEmail': r[9],
+                'empCode': r[10],
+            }
+            for r in rows
+        ]), 200
     except Exception as e:
         import traceback
         traceback.print_exc()
