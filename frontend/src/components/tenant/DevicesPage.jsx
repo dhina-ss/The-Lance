@@ -1850,15 +1850,16 @@ function fmtSecs(s) {
 	return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
 }
 
-// Label + icon for a session event type (login / sleep / wake / startup).
+// Label + icon for a session event type (login / logoff / sleep / wake / startup).
 function sessionEventShown(e) {
-	return ['login', 'logoff', 'lock', 'shutdown', 'alert', 'device_on', 'startup', 'power_on', 'sleep', 'wake', 'unlock'].includes((e.type || '').toLowerCase());
+	return ['login', 'logoff', 'logout', 'lock', 'shutdown', 'alert', 'device_on', 'startup', 'power_on', 'sleep', 'wake', 'unlock'].includes((e.type || '').toLowerCase());
 }
 
 function sessionEventMeta(type) {
 	switch ((type || '').toLowerCase()) {
 		case 'login': return { label: 'Login', icon: 'login', color: 'text-emerald-600' };
-		case 'logoff': return { label: 'Logoff', icon: 'logout', color: 'text-slate-600' };
+		case 'logoff':
+		case 'logout': return { label: 'Logoff', icon: 'logout', color: 'text-slate-500' };
 		case 'device_on':
 		case 'startup':
 		case 'power_on': return { label: 'Device On', icon: 'power', color: 'text-cyan-600' };

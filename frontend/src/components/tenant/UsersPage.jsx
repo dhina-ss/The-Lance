@@ -98,12 +98,13 @@ function getLogActionMeta(type, detail) {
 				desc: detail ? `User signed in: ${detail}` : 'Employee signed in to endpoint session',
 			};
 		case 'logoff':
+		case 'logout':
 			return {
 				action: 'User Logoff',
 				icon: LogOut,
 				color: 'text-slate-600 bg-slate-500/10 border-slate-500/20',
 				dot: 'bg-slate-500',
-				desc: detail ? `User signed out: ${detail}` : 'User signed out of Windows session',
+				desc: detail ? `User signed out: ${detail}` : 'Employee signed out of endpoint session',
 			};
 		case 'device_on':
 		case 'startup':
