@@ -1023,9 +1023,11 @@ _SERVER_STARTED_AT = _dt.datetime.now(_dt.timezone.utc)
 LOCATION_REFRESH_SECONDS = 3600  # Re-check location once every 1 hour
 
 
-# A heartbeat gap at least this long means the device went offline / powered off
-# or slept (detected every 1 minute).
-SHUTDOWN_GAP_SECONDS = 60
+# Heartbeat gap thresholds:
+#   > 1 min (60s) without heartbeat -> considered Sleep
+#   > 5 min (300s) without heartbeat (and not OS-suspended) -> considered Shutdown / Offline
+SLEEP_GAP_SECONDS = 60
+SHUTDOWN_GAP_SECONDS = 300
 
 
 def _human_duration(seconds):
@@ -1164,15 +1166,17 @@ LOCK_FRESH_SECONDS = 45
 
 
 def compute_status(last_heartbeat, suspended_at, locked_at=None):
-    """Online if a heartbeat arrived < 1 min ago; Sleep if the screen is auto-
-    locked or the device is suspended; else Offline."""
+    """Online if a heartbeat arrived < 1 min ago (unless locked/suspended);
+    Sleep when 1–5 min without heartbeat (or OS-suspended / fresh screen lock);
+    Offline when > 5 min without heartbeat and not explicitly suspended."""
     import datetime
     now = datetime.datetime.now(datetime.timezone.utc)
     if suspended_at is not None and (last_heartbeat is None or suspended_at >= last_heartbeat):
         return 'Sleep'
     if last_heartbeat is not None:
         try:
-            if (now - last_heartbeat).total_seconds() < SHUTDOWN_GAP_SECONDS:
+            elapsed = (now - last_heartbeat).total_seconds()
+            if elapsed < SLEEP_GAP_SECONDS:
                 # On and heartbeating - but an auto-locked screen shows as Sleep.
                 if locked_at is not None:
                     try:
@@ -1181,6 +1185,8 @@ def compute_status(last_heartbeat, suspended_at, locked_at=None):
                     except Exception:
                         pass
                 return 'Online'
+            if elapsed < SHUTDOWN_GAP_SECONDS:
+                return 'Sleep'
         except Exception:
             pass
     if suspended_at is not None:
@@ -1190,12 +1196,15 @@ def compute_status(last_heartbeat, suspended_at, locked_at=None):
 
 _last_status_sweep_ts = 0.0
 _status_sweep_lock = None
+_AUTO_SLEEP_DETAIL = 'Device entered sleep / idle (> 1m)'
 
 
 def sweep_stale_device_statuses(cur=None, force=False):
-    """Record 'shutdown' within 1 minute for devices whose heartbeats stopped
-    and are not marked suspended (sleep). Safe to call from both the 60s
-    background monitor and API reads (throttled every 45s unless forced)."""
+    """Background 1-minute status detector:
+    - > 1 min (60s) and <= 5 min without heartbeat (not suspended/shutdown): record 'sleep'.
+    - > 5 min (300s) without heartbeat (not suspended): upgrade any >1m auto-sleep marker
+      or insert a 'shutdown' event at LastHeartbeatTime.
+    Throttled every 45s on read paths unless forced by the 60s background thread."""
     global _last_status_sweep_ts
     now_mono = time.monotonic()
     if not force and (now_mono - _last_status_sweep_ts) < 45:
@@ -1215,12 +1224,34 @@ def sweep_stale_device_statuses(cur=None, force=False):
                 own_conn.close()
             return
 
+        # 1) Devices inactive > 5 min (and not explicitly suspended): upgrade auto-sleep -> shutdown
+        cur.execute("""
+            UPDATE device_session_events e
+            SET event_type = 'shutdown',
+                detail = 'Device powered off / offline (> 5m)'
+            FROM devices d
+            WHERE e.device_id = d."DeviceId"
+              AND e.event_type = 'sleep'
+              AND e.detail = %s
+              AND d."LastHeartbeatTime" IS NOT NULL
+              AND d."LastHeartbeatTime" < CURRENT_TIMESTAMP - INTERVAL '300 seconds'
+              AND d."SuspendedAt" IS NULL
+              AND e.occurred_at >= d."LastHeartbeatTime" - INTERVAL '60 seconds'
+              AND NOT EXISTS (
+                  SELECT 1 FROM device_session_events e2
+                  WHERE e2.device_id = d."DeviceId"
+                    AND e2.event_type = 'shutdown'
+                    AND e2.occurred_at >= d."LastHeartbeatTime" - INTERVAL '60 seconds'
+              );
+        """, (_AUTO_SLEEP_DETAIL,))
+
+        # 2) Devices inactive > 5 min with no shutdown record yet -> insert shutdown
         cur.execute("""
             INSERT INTO device_session_events (device_id, event_type, detail, occurred_at)
-            SELECT d."DeviceId", 'shutdown', 'Device powered off / offline (> 1m)', d."LastHeartbeatTime"
+            SELECT d."DeviceId", 'shutdown', 'Device powered off / offline (> 5m)', d."LastHeartbeatTime"
             FROM devices d
             WHERE d."LastHeartbeatTime" IS NOT NULL
-              AND d."LastHeartbeatTime" < CURRENT_TIMESTAMP - INTERVAL '60 seconds'
+              AND d."LastHeartbeatTime" < CURRENT_TIMESTAMP - INTERVAL '300 seconds'
               AND d."SuspendedAt" IS NULL
               AND NOT EXISTS (
                   SELECT 1 FROM device_session_events e
@@ -1229,6 +1260,24 @@ def sweep_stale_device_statuses(cur=None, force=False):
                     AND e.occurred_at >= d."LastHeartbeatTime" - INTERVAL '60 seconds'
               );
         """)
+
+        # 3) Devices inactive between > 1 min and <= 5 min -> record auto-sleep once
+        cur.execute("""
+            INSERT INTO device_session_events (device_id, event_type, detail, occurred_at)
+            SELECT d."DeviceId", 'sleep', %s, d."LastHeartbeatTime"
+            FROM devices d
+            WHERE d."LastHeartbeatTime" IS NOT NULL
+              AND d."LastHeartbeatTime" < CURRENT_TIMESTAMP - INTERVAL '60 seconds'
+              AND d."LastHeartbeatTime" >= CURRENT_TIMESTAMP - INTERVAL '300 seconds'
+              AND d."SuspendedAt" IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM device_session_events e
+                  WHERE e.device_id = d."DeviceId"
+                    AND e.event_type IN ('sleep', 'shutdown')
+                    AND e.occurred_at >= d."LastHeartbeatTime" - INTERVAL '60 seconds'
+              );
+        """, (_AUTO_SLEEP_DETAIL,))
+
         if own_conn is not None:
             own_conn.commit()
     except Exception:
@@ -1432,24 +1481,38 @@ def device_heartbeat():
                                      detail=f'Device woke from sleep (asleep for {dur_label})')
             elif gap >= SHUTDOWN_GAP_SECONDS:
                 cur.execute(
-                    "SELECT id FROM device_session_events "
-                    "WHERE device_id=%s AND event_type='shutdown' "
+                    "SELECT id, event_type, detail FROM device_session_events "
+                    "WHERE device_id=%s AND event_type IN ('shutdown', 'sleep') "
                     "  AND occurred_at >= %s - INTERVAL '60 seconds' "
                     "  AND occurred_at <= %s + INTERVAL '60 seconds' "
                     "ORDER BY occurred_at DESC LIMIT 1;",
                     (device_id, _prev[0], _prev[0]),
                 )
-                existing_sd = cur.fetchone()
-                if existing_sd:
+                existing_ev = cur.fetchone()
+                if existing_ev and (existing_ev[1] == 'shutdown' or existing_ev[2] == _AUTO_SLEEP_DETAIL):
                     cur.execute(
-                        "UPDATE device_session_events SET detail=%s WHERE id=%s;",
-                        (_human_duration(gap), existing_sd[0]),
+                        "UPDATE device_session_events SET event_type='shutdown', detail=%s WHERE id=%s;",
+                        (_human_duration(gap), existing_ev[0]),
                     )
                 else:
                     record_session_event(cur, device_id, 'shutdown',
                                          detail=_human_duration(gap), occurred_at=_prev[0])
                 record_session_event(cur, device_id, 'device_on',
                                      detail=f'Device powered on (after {_human_duration(gap)} offline)')
+            elif gap >= SLEEP_GAP_SECONDS:
+                cur.execute(
+                    "SELECT id FROM device_session_events "
+                    "WHERE device_id=%s AND event_type IN ('sleep', 'shutdown') "
+                    "  AND occurred_at >= %s - INTERVAL '60 seconds' "
+                    "  AND occurred_at <= %s + INTERVAL '60 seconds' "
+                    "ORDER BY occurred_at DESC LIMIT 1;",
+                    (device_id, _prev[0], _prev[0]),
+                )
+                if not cur.fetchone():
+                    record_session_event(cur, device_id, 'sleep',
+                                         detail=_AUTO_SLEEP_DETAIL, occurred_at=_prev[0])
+                record_session_event(cur, device_id, 'wake',
+                                     detail=f'Device woke from sleep (asleep for {_human_duration(gap)})')
         elif not _prev or _prev[0] is None:
             record_session_event(cur, device_id, 'device_on', detail='Endpoint powered on / online')
         cur.execute(
@@ -1704,6 +1767,8 @@ def report_session_event():
         cur = conn.cursor()
         if event_type == 'lock':
             cur.execute('UPDATE devices SET "LockedAt"=CURRENT_TIMESTAMP WHERE "DeviceId"=%s;', (device_id,))
+        elif event_type == 'shutdown':
+            cur.execute('UPDATE devices SET "LockedAt"=NULL, "SuspendedAt"=NULL WHERE "DeviceId"=%s;', (device_id,))
         elif event_type in ('unlock', 'login'):
             cur.execute('SELECT "SuspendedAt" FROM devices WHERE "DeviceId"=%s;', (device_id,))
             susp_row = cur.fetchone()

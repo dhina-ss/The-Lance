@@ -723,8 +723,8 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
 				<SummaryCard title="Total Devices" value={totalCount} icon="devices" tone="primary" badge={`${onlineCount} online`} sub="Fleet wide" />
 				<SummaryCard title="Online" value={onlineCount} icon="sensors" tone="secondary" badge={totalCount ? `${Math.round((onlineCount / totalCount) * 100)}% connected` : '—'} sub="Live" />
-				<SummaryCard title="Sleep" value={sleepCount} icon="bedtime" tone="tertiary" badge="Suspended" sub="Awaiting wake" />
-				<SummaryCard title="Offline" value={offlineCount} icon="cloud_off" tone="error" badge="Not reachable" sub="> 1 min idle" />
+				<SummaryCard title="Sleep" value={sleepCount} icon="bedtime" tone="tertiary" badge="Suspended" sub="> 1 min idle / locked" />
+				<SummaryCard title="Offline" value={offlineCount} icon="cloud_off" tone="error" badge="Not reachable" sub="> 5 min shutdown" />
 			</section>
 
 			{/* Main Table Container */}
