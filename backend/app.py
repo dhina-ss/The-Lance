@@ -1051,14 +1051,14 @@ def record_session_event(cur, device_id, event_type, detail=None, occurred_at=No
         return
     import datetime
     try:
-        # Avoid duplicate events within a 15-second freshness window when occurred_at is None
+        # Avoid duplicate events within a 25-second freshness window when occurred_at is None
         if occurred_at is None:
             cur.execute('SELECT event_type, occurred_at FROM device_session_events '
                         'WHERE device_id=%s ORDER BY occurred_at DESC LIMIT 1;', (device_id,))
             last_ev = cur.fetchone()
             if last_ev and last_ev[0] == event_type and last_ev[1] is not None:
                 diff = (datetime.datetime.now(datetime.timezone.utc) - last_ev[1]).total_seconds()
-                if diff < 15:
+                if diff < 25:
                     return
 
         if occurred_at is not None:
@@ -1541,6 +1541,43 @@ def report_work_time():
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/devices/session-event', methods=['POST'])
+def report_session_event():
+    """Agent service beacon: records Windows session/power events (login, logoff, lock, unlock, shutdown)
+    directly from Session 0 so domain users without local admin or UI trackers are always monitored."""
+    device_id = (request.headers.get('X-Device-Id') or '').strip()
+    if not device_id:
+        return jsonify({'error': 'device id required'}), 400
+    data = request.get_json() or {}
+    event_type = (data.get('eventType') or '').strip().lower()
+    detail = (data.get('detail') or '').strip() or None
+    allowed = {'login', 'logoff', 'lock', 'unlock', 'shutdown', 'device_on', 'sleep', 'wake'}
+    if event_type not in allowed:
+        return jsonify({'error': f'Unsupported eventType: {event_type}'}), 400
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        if event_type == 'lock':
+            cur.execute('UPDATE devices SET "LockedAt"=CURRENT_TIMESTAMP WHERE "DeviceId"=%s;', (device_id,))
+        elif event_type in ('unlock', 'login'):
+            cur.execute('UPDATE devices SET "LockedAt"=NULL, "SuspendedAt"=NULL, '
+                        '"Username"=COALESCE(%s,"Username") WHERE "DeviceId"=%s;',
+                        (detail if event_type == 'login' else None, device_id))
+        elif event_type == 'logoff':
+            cur.execute('UPDATE devices SET "LockedAt"=NULL WHERE "DeviceId"=%s;', (device_id,))
+        elif event_type == 'sleep':
+            cur.execute('UPDATE devices SET "SuspendedAt"=CURRENT_TIMESTAMP WHERE "DeviceId"=%s;', (device_id,))
+        elif event_type == 'wake':
+            cur.execute('UPDATE devices SET "SuspendedAt"=NULL WHERE "DeviceId"=%s;', (device_id,))
+        record_session_event(cur, device_id, event_type, detail=detail)
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({'success': True}), 200
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 

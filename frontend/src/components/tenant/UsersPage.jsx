@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom';
 import {
 	Users, UserPlus, TrendingUp, BadgeCheck, Search, X, Mail, Lock, ShieldCheck, User,
 	Pencil, Trash2, CheckCircle2, AlertTriangle, Eye, EyeOff, Calendar, Clock, Activity,
-	LogIn, Unlock, Power, ChevronDown, Check, FileText, Bell, Laptop, ArrowRight,
+	LogIn, LogOut, Unlock, Power, ChevronDown, Check, FileText, Bell, Laptop, ArrowRight,
 	Moon, Sun
 } from 'lucide-react';
 import { fetchUsers, createUser, updateUser, deleteUser, fetchUserLimit, relativeTime, fetchUserLogs } from '../../api/ems';
@@ -96,6 +96,14 @@ function getLogActionMeta(type, detail) {
 				color: 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20',
 				dot: 'bg-emerald-500',
 				desc: detail ? `User signed in: ${detail}` : 'Employee signed in to endpoint session',
+			};
+		case 'logoff':
+			return {
+				action: 'User Logoff',
+				icon: LogOut,
+				color: 'text-slate-600 bg-slate-500/10 border-slate-500/20',
+				dot: 'bg-slate-500',
+				desc: detail ? `User signed out: ${detail}` : 'User signed out of Windows session',
 			};
 		case 'device_on':
 		case 'startup':
