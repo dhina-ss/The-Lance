@@ -871,39 +871,69 @@ def to_iso(val):
 
 
 def reverse_geocode(lat, lon):
-    """lat/lon -> (city, region, country) via OpenStreetMap Nominatim."""
+    """lat/lon -> (city, region, country) via OpenStreetMap Nominatim with BigDataCloud fallback."""
     import urllib.request
     try:
         url = (f'https://nominatim.openstreetmap.org/reverse?format=json'
-               f'&lat={lat}&lon={lon}&zoom=10&addressdetails=1')
+               f'&lat={lat}&lon={lon}&zoom=12&addressdetails=1')
         req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
         with urllib.request.urlopen(req, timeout=6) as resp:
             data = json.loads(resp.read().decode())
         addr = data.get('address', {}) or {}
-        city = addr.get('city') or addr.get('town') or addr.get('village') or addr.get('county')
-        return city, addr.get('state'), addr.get('country')
+        city = (addr.get('city') or addr.get('town') or addr.get('village')
+                or addr.get('municipality') or addr.get('state_district') or addr.get('county'))
+        region = addr.get('state')
+        country = addr.get('country')
+        if city or country:
+            return city, region, country
     except Exception as e:
-        print(f'reverse_geocode failed: {e}')
-        return None, None, None
+        print(f'reverse_geocode nominatim failed: {e}')
+
+    # Fallback: BigDataCloud free reverse-geocode API (does not rate-limit datacenter IPs)
+    try:
+        url = (f'https://api.bigdatacloud.net/data/reverse-geocode-client'
+               f'?latitude={lat}&longitude={lon}&localityLanguage=en')
+        req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode())
+        city = data.get('city') or data.get('locality')
+        region = data.get('principalSubdivision')
+        country = data.get('countryName')
+        if city or country:
+            return city, region, country
+    except Exception as e:
+        print(f'reverse_geocode bigdatacloud failed: {e}')
+    return None, None, None
 
 
 def ip_geolocate(ip):
-    """Public IP -> (city, region, country) via ip-api.com. A server-friendly
-    fallback for reverse geocoding, since Nominatim rate-limits/blocks the
-    datacenter IPs our backend runs on. Free tier, no key, HTTP only."""
+    """Public IP -> (city, region, country, lat, lon) via ip-api.com with ipwho.is fallback."""
     import urllib.request
     if not ip:
-        return None, None, None
+        return None, None, None, None, None
     try:
-        url = f'http://ip-api.com/json/{ip}?fields=status,city,regionName,country'
+        url = f'http://ip-api.com/json/{ip}?fields=status,city,regionName,country,lat,lon'
         req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
         with urllib.request.urlopen(req, timeout=6) as resp:
             data = json.loads(resp.read().decode())
         if data.get('status') == 'success':
-            return data.get('city'), data.get('regionName'), data.get('country')
+            return (data.get('city'), data.get('regionName'), data.get('country'),
+                    data.get('lat'), data.get('lon'))
     except Exception as e:
-        print(f'ip_geolocate failed: {e}')
-    return None, None, None
+        print(f'ip_geolocate ip-api failed: {e}')
+
+    # Fallback: ipwho.is (HTTPS, no key required)
+    try:
+        url = f'https://ipwho.is/{ip}'
+        req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode())
+        if data.get('success'):
+            return (data.get('city'), data.get('region'), data.get('country'),
+                    data.get('latitude'), data.get('longitude'))
+    except Exception as e:
+        print(f'ip_geolocate ipwho.is failed: {e}')
+    return None, None, None, None, None
 
 
 # A heartbeat gap at least this long means the device was powered off / offline
@@ -1011,18 +1041,28 @@ def _tenant_inactivity(cur):
 
 
 def client_public_ip():
-    """The caller's public IP: leftmost X-Forwarded-For, else remote_addr.
-    Returns None for private/loopback addresses (e.g. local testing)."""
+    """The caller's public IP: CF-Connecting-IP / True-Client-IP / first public IP
+    in X-Forwarded-For, else remote_addr. Returns None for private/loopback addresses."""
     import ipaddress
+    candidates = []
+    for h in ('CF-Connecting-IP', 'True-Client-IP'):
+        v = request.headers.get(h, '').strip()
+        if v:
+            candidates.append(v)
     fwd = request.headers.get('X-Forwarded-For', '')
-    candidate = (fwd.split(',')[0].strip() if fwd else '') or (request.remote_addr or '')
-    try:
-        ip = ipaddress.ip_address(candidate)
-        if ip.is_private or ip.is_loopback or ip.is_link_local:
-            return None
-        return candidate
-    except ValueError:
-        return None
+    if fwd:
+        candidates.extend(part.strip() for part in fwd.split(',') if part.strip())
+    if request.remote_addr:
+        candidates.append(request.remote_addr.strip())
+
+    for candidate in candidates:
+        try:
+            ip = ipaddress.ip_address(candidate)
+            if not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast):
+                return candidate
+        except ValueError:
+            continue
+    return None
 
 
 # The device counts as "locked" (Sleep) while its LockedAt has been refreshed
@@ -1219,8 +1259,12 @@ def device_heartbeat():
         # If the device was suspended, log the wake event.
         # If it was shut down/offline, log the shutdown at the moment it went offline
         # AND log the device_on event when it powers back on.
-        cur.execute('SELECT "LastHeartbeatTime", "SuspendedAt" FROM devices WHERE "DeviceId"=%s;', (device_id,))
+        cur.execute('SELECT "LastHeartbeatTime", "SuspendedAt", "PublicIPAddress", "LocationCity", "Latitude" '
+                    'FROM devices WHERE "DeviceId"=%s;', (device_id,))
         _prev = cur.fetchone()
+        prev_public_ip = _prev[2] if _prev else None
+        prev_loc_city = _prev[3] if _prev else None
+        prev_lat = _prev[4] if _prev else None
         if _prev and _prev[0] is not None:
             gap = (datetime.datetime.now(datetime.timezone.utc) - _prev[0]).total_seconds()
             was_suspended = _prev[1] is not None
@@ -1242,18 +1286,20 @@ def device_heartbeat():
             'WHERE "DeviceId"=%s;',
             (data.get('ipAddress'), data.get('username'), public_ip, device_id))
 
-        # City/region/country from the public IP, once, when we don't already
-        # have a location for this device (GPS reverse-geocode fills GpsCity when
-        # it can; this covers the common case where that is unavailable).
-        if public_ip:
-            cur.execute('SELECT "LocationCity", "GpsCity" FROM devices WHERE "DeviceId"=%s;', (device_id,))
-            loc = cur.fetchone()
-            if loc and not (loc[0] or loc[1]):
-                gcity, gregion, gcountry = ip_geolocate(public_ip)
-                if gcity or gcountry:
-                    cur.execute('UPDATE devices SET "LocationCity"=%s, '
-                                '"LocationRegion"=COALESCE("LocationRegion",%s), "LocationCountry"=%s '
-                                'WHERE "DeviceId"=%s;', (gcity, gregion, gcountry, device_id))
+        # City/region/country/lat/lon from the public IP: update whenever the public
+        # IP changed, or when IP location (city or coordinates) hasn't been resolved yet.
+        if public_ip and (public_ip != prev_public_ip or not prev_loc_city or prev_lat is None):
+            gcity, gregion, gcountry, glat, glon = ip_geolocate(public_ip)
+            if gcity or gcountry or glat is not None:
+                cur.execute(
+                    'UPDATE devices SET "LocationCity"=COALESCE(%s,"LocationCity"), '
+                    '"LocationRegion"=COALESCE(%s,"LocationRegion"), '
+                    '"LocationCountry"=COALESCE(%s,"LocationCountry"), '
+                    '"Latitude"=COALESCE(%s,"Latitude"), '
+                    '"Longitude"=COALESCE(%s,"Longitude"), '
+                    '"LocationUpdatedAt"=CURRENT_TIMESTAMP '
+                    'WHERE "DeviceId"=%s;',
+                    (gcity, gregion, gcountry, glat, glon, device_id))
 
         # Auto-expire timed USB blocking.
         cur.execute('UPDATE devices SET "UsbBlockingEnabled"=false, "UsbBlockingUntil"=NULL '
@@ -1516,7 +1562,7 @@ def report_location():
         cur = conn.cursor()
         cur.execute('UPDATE devices SET "GpsLatitude"=%s, "GpsLongitude"=%s, "GpsAccuracyMeters"=%s, '
                     '"GpsUpdatedAt"=CURRENT_TIMESTAMP, '
-                    '"GpsCity"=COALESCE(%s,"GpsCity"), "GpsCountry"=COALESCE(%s,"GpsCountry"), '
+                    '"GpsCity"=%s, "GpsCountry"=%s, '
                     '"LocationRegion"=COALESCE(%s,"LocationRegion") WHERE "DeviceId"=%s;',
                     (lat, lon, data.get('accuracyMeters'), city, country, region, device_id))
         conn.commit()
