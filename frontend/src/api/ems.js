@@ -243,6 +243,15 @@ export async function setStoreGating(id, enabled) {
   return mapDevice(await res.json());
 }
 
+export async function refreshDeviceLocation(id) {
+  const res = await fetch(`${API_BASE}/api/devices/${encodeURIComponent(id)}/refresh-location`, {
+    method: 'POST',
+    headers: credentialHeaders,
+  });
+  if (!res.ok) throwForStatus(res.status);
+  return res.json();
+}
+
 export async function uninstallApp(deviceId, appId) {
   const res = await fetch(
     `${API_BASE}/api/devices/${encodeURIComponent(deviceId)}/installed-apps/${encodeURIComponent(appId)}/uninstall`,

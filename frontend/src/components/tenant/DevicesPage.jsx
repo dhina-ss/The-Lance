@@ -16,6 +16,7 @@ import {
 	removeBlockedWebsite,
 	setUsbBlocking,
 	setLoginPolicy,
+	refreshDeviceLocation,
 	uninstallApp,
 	uploadPackage,
 	queueInstall,
@@ -363,6 +364,34 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 
 	// Id of the command currently being cancelled (drives its spinner).
 	const [cancellingCommandId, setCancellingCommandId] = useState(null);
+	const [refreshingLocation, setRefreshingLocation] = useState(false);
+
+	const handleRefreshLocation = async () => {
+		if (!inspectDevice || refreshingLocation) return;
+		setRefreshingLocation(true);
+		try {
+			const updated = await refreshDeviceLocation(inspectDevice.id);
+			const nextFields = {
+				locationSource: updated.locationSource ?? inspectDevice.locationSource,
+				city: updated.city ?? inspectDevice.city,
+				region: updated.region ?? inspectDevice.region,
+				country: updated.country ?? inspectDevice.country,
+				latitude: updated.latitude ?? inspectDevice.latitude,
+				longitude: updated.longitude ?? inspectDevice.longitude,
+				gpsAccuracyMeters: updated.gpsAccuracyMeters ?? inspectDevice.gpsAccuracyMeters,
+				locationUpdatedAt: updated.locationUpdatedAt ?? inspectDevice.locationUpdatedAt,
+				publicIp: updated.publicIp ?? inspectDevice.publicIp,
+				locationLabel: [updated.city, updated.region, updated.country].filter(Boolean).join(', ') || inspectDevice.locationLabel,
+			};
+			setInspectDevice((cur) => (cur && cur.id === inspectDevice.id ? { ...cur, ...nextFields } : cur));
+			setDevices((ds) => ds.map((d) => (d.id === inspectDevice.id ? { ...d, ...nextFields } : d)));
+			notify('Device location refreshed.');
+		} catch (err) {
+			notify(err instanceof Error ? err.message : 'Failed to refresh location.');
+		} finally {
+			setRefreshingLocation(false);
+		}
+	};
 
 	const handleOpenUninstallModal = (app) => {
 		setUninstallTargetApp(app);
@@ -1222,16 +1251,28 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 
 									{/* Location with Map */}
 									<div className="bg-surface-container-high/40 p-5 rounded-2xl border border-outline-variant/40 space-y-4">
-										<div className="flex items-center justify-between">
+										<div className="flex items-center justify-between gap-2">
 											<SectionTitle icon="location_on" text={inspectDevice.locationSource === 'GPS' ? 'Precise Location' : 'Approximate Location'} />
-											{inspectDevice.locationSource && (
-												<span className={`px-3 py-1 font-bold text-[11px] rounded-full flex items-center gap-1 ${inspectDevice.locationSource === 'GPS' ? 'bg-secondary/10 text-secondary' : 'bg-primary/10 text-primary'}`}>
-													<span className="material-symbols-outlined text-[13px]">{inspectDevice.locationSource === 'GPS' ? 'my_location' : 'public'}</span>
-													{inspectDevice.locationSource === 'GPS'
-														? `GPS${inspectDevice.gpsAccuracyMeters ? ` · ±${Math.round(inspectDevice.gpsAccuracyMeters)}m` : ''}`
-														: 'IP (approx)'}
-												</span>
-											)}
+											<div className="flex items-center gap-2">
+												{inspectDevice.locationSource && (
+													<span className={`px-3 py-1 font-bold text-[11px] rounded-full flex items-center gap-1 ${inspectDevice.locationSource === 'GPS' ? 'bg-secondary/10 text-secondary' : 'bg-primary/10 text-primary'}`}>
+														<span className="material-symbols-outlined text-[13px]">{inspectDevice.locationSource === 'GPS' ? 'my_location' : 'public'}</span>
+														{inspectDevice.locationSource === 'GPS'
+															? `GPS${inspectDevice.gpsAccuracyMeters ? ` · ±${Math.round(inspectDevice.gpsAccuracyMeters)}m` : ''}`
+															: 'IP (approx)'}
+													</span>
+												)}
+												<button
+													type="button"
+													onClick={handleRefreshLocation}
+													disabled={refreshingLocation}
+													className="px-2.5 py-1 bg-white border border-outline-variant/50 rounded-full text-[11px] font-semibold text-primary hover:bg-slate-100 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+													title="Re-check device location (auto-refreshes every 1 hour)"
+												>
+													<RefreshCw size={11} className={refreshingLocation ? 'animate-spin' : ''} />
+													{refreshingLocation ? 'Checking…' : 'Refresh'}
+												</button>
+											</div>
 										</div>
 										{inspectDevice.latitude != null && inspectDevice.longitude != null ? (
 											<div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -1241,23 +1282,24 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 													<Field label="Country" value={inspectDevice.country || '—'} />
 													<Field label="Public IP" value={inspectDevice.publicIp || '—'} mono />
 													<Field label="Coordinates" value={`${inspectDevice.latitude.toFixed(4)}, ${inspectDevice.longitude.toFixed(4)}`} mono />
-													<div>
+													<Field label="Last Checked" value={inspectDevice.locationUpdatedAt ? relativeTime(inspectDevice.locationUpdatedAt) : '—'} />
+													<div className="col-span-2">
 														<span className="text-[11px] text-on-surface-variant block uppercase font-medium mb-0.5">Map</span>
-														<a href={`https://www.openstreetmap.org/?mlat=${inspectDevice.latitude}&mlon=${inspectDevice.longitude}#map=12/${inspectDevice.latitude}/${inspectDevice.longitude}`} target="_blank" rel="noreferrer" className="text-primary font-semibold text-[13px] hover:underline">Open in OpenStreetMap</a>
+														<a href={`https://www.google.com/maps?q=${inspectDevice.latitude},${inspectDevice.longitude}`} target="_blank" rel="noreferrer" className="text-primary font-semibold text-[13px] hover:underline">Open in Google Maps</a>
 													</div>
 												</div>
 												<div className="rounded-2xl overflow-hidden border border-outline-variant/40 h-56 bg-surface-container-high">
 													<iframe
 														title="Device location"
-														className="w-full h-full"
+														className="w-full h-full border-0"
 														loading="lazy"
-														src={`https://www.openstreetmap.org/export/embed.html?bbox=${inspectDevice.longitude - 0.08}%2C${inspectDevice.latitude - 0.06}%2C${inspectDevice.longitude + 0.08}%2C${inspectDevice.latitude + 0.06}&layer=mapnik&marker=${inspectDevice.latitude}%2C${inspectDevice.longitude}`}
+														src={`https://maps.google.com/maps?q=${inspectDevice.latitude},${inspectDevice.longitude}&z=13&output=embed`}
 													/>
 												</div>
 											</div>
 										) : (
 											<p className="text-[12px] text-on-surface-variant">
-												No location yet. It resolves from the device's public IP on its next heartbeat.
+												No location yet. It resolves automatically on heartbeat / every 1 hour.
 											</p>
 										)}
 									</div>

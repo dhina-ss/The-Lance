@@ -906,23 +906,44 @@ def reverse_geocode(lat, lon):
     return None, None, None
 
 
+COUNTRY_CODE_NAMES = {
+    'IN': 'India', 'US': 'United States', 'GB': 'United Kingdom', 'CA': 'Canada',
+    'AU': 'Australia', 'DE': 'Germany', 'FR': 'France', 'SG': 'Singapore',
+    'AE': 'United Arab Emirates', 'JP': 'Japan', 'NL': 'Netherlands', 'SE': 'Sweden',
+    'CH': 'Switzerland', 'MY': 'Malaysia', 'ID': 'Indonesia', 'PH': 'Philippines',
+}
+
+
 def ip_geolocate(ip):
-    """Public IP -> (city, region, country, lat, lon) via ip-api.com with ipwho.is fallback."""
+    """Public IP -> (city, region, country, lat, lon).
+    Tries ipinfo.io first (better regional city precision on Indian/Asian ISPs),
+    then falls back to ipwho.is and ip-api.com."""
     import urllib.request
     if not ip:
         return None, None, None, None, None
+
+    # 1) ipinfo.io (HTTPS)
     try:
-        url = f'http://ip-api.com/json/{ip}?fields=status,city,regionName,country,lat,lon'
+        url = f'https://ipinfo.io/{ip}/json'
         req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
         with urllib.request.urlopen(req, timeout=6) as resp:
             data = json.loads(resp.read().decode())
-        if data.get('status') == 'success':
-            return (data.get('city'), data.get('regionName'), data.get('country'),
-                    data.get('lat'), data.get('lon'))
+        loc_str = data.get('loc') or ''
+        lat = lon = None
+        if ',' in loc_str:
+            parts = loc_str.split(',', 1)
+            try:
+                lat, lon = float(parts[0]), float(parts[1])
+            except ValueError:
+                lat = lon = None
+        country_raw = (data.get('country') or '').strip()
+        country = COUNTRY_CODE_NAMES.get(country_raw.upper(), country_raw) if country_raw else None
+        if data.get('city') or lat is not None:
+            return data.get('city'), data.get('region'), country, lat, lon
     except Exception as e:
-        print(f'ip_geolocate ip-api failed: {e}')
+        print(f'ip_geolocate ipinfo.io failed: {e}')
 
-    # Fallback: ipwho.is (HTTPS, no key required)
+    # 2) Fallback: ipwho.is (HTTPS, no key required)
     try:
         url = f'https://ipwho.is/{ip}'
         req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
@@ -933,7 +954,22 @@ def ip_geolocate(ip):
                     data.get('latitude'), data.get('longitude'))
     except Exception as e:
         print(f'ip_geolocate ipwho.is failed: {e}')
+
+    # 3) Fallback: ip-api.com (HTTP only)
+    try:
+        url = f'http://ip-api.com/json/{ip}?fields=status,city,regionName,country,lat,lon'
+        req = urllib.request.Request(url, headers={'User-Agent': 'TheLanceEndpoint/1.0'})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode())
+        if data.get('status') == 'success':
+            return (data.get('city'), data.get('regionName'), data.get('country'),
+                    data.get('lat'), data.get('lon'))
+    except Exception as e:
+        print(f'ip_geolocate ip-api failed: {e}')
     return None, None, None, None, None
+
+
+LOCATION_REFRESH_SECONDS = 3600  # Re-check location once every 1 hour
 
 
 # A heartbeat gap at least this long means the device was powered off / offline
@@ -1259,14 +1295,20 @@ def device_heartbeat():
         # If the device was suspended, log the wake event.
         # If it was shut down/offline, log the shutdown at the moment it went offline
         # AND log the device_on event when it powers back on.
-        cur.execute('SELECT "LastHeartbeatTime", "SuspendedAt", "PublicIPAddress", "LocationCity", "Latitude" '
+        cur.execute('SELECT "LastHeartbeatTime", "SuspendedAt", "PublicIPAddress", "LocationCity", "Latitude", '
+                    '"LocationUpdatedAt", "GpsLatitude", "GpsLongitude", "GpsCity" '
                     'FROM devices WHERE "DeviceId"=%s;', (device_id,))
         _prev = cur.fetchone()
         prev_public_ip = _prev[2] if _prev else None
         prev_loc_city = _prev[3] if _prev else None
         prev_lat = _prev[4] if _prev else None
+        prev_loc_updated = _prev[5] if _prev else None
+        gps_lat = _prev[6] if _prev else None
+        gps_lon = _prev[7] if _prev else None
+        gps_city = _prev[8] if _prev else None
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
         if _prev and _prev[0] is not None:
-            gap = (datetime.datetime.now(datetime.timezone.utc) - _prev[0]).total_seconds()
+            gap = (now_utc - _prev[0]).total_seconds()
             was_suspended = _prev[1] is not None
             if gap >= SHUTDOWN_GAP_SECONDS:
                 if was_suspended:
@@ -1286,9 +1328,11 @@ def device_heartbeat():
             'WHERE "DeviceId"=%s;',
             (data.get('ipAddress'), data.get('username'), public_ip, device_id))
 
-        # City/region/country/lat/lon from the public IP: update whenever the public
-        # IP changed, or when IP location (city or coordinates) hasn't been resolved yet.
-        if public_ip and (public_ip != prev_public_ip or not prev_loc_city or prev_lat is None):
+        # City/region/country/lat/lon from the public IP: update when the public IP
+        # changed, when IP location hasn't been resolved yet, or every 1 hour.
+        loc_stale = (prev_loc_updated is None or
+                     (now_utc - prev_loc_updated).total_seconds() >= LOCATION_REFRESH_SECONDS)
+        if public_ip and (public_ip != prev_public_ip or not prev_loc_city or prev_lat is None or loc_stale):
             gcity, gregion, gcountry, glat, glon = ip_geolocate(public_ip)
             if gcity or gcountry or glat is not None:
                 cur.execute(
@@ -1300,6 +1344,16 @@ def device_heartbeat():
                     '"LocationUpdatedAt"=CURRENT_TIMESTAMP '
                     'WHERE "DeviceId"=%s;',
                     (gcity, gregion, gcountry, glat, glon, device_id))
+
+        # Backfill GPS city/country if GPS coords exist but reverse-geocode previously failed.
+        if gps_lat is not None and gps_lon is not None and not gps_city:
+            rcity, rregion, rcountry = reverse_geocode(gps_lat, gps_lon)
+            if rcity or rcountry:
+                cur.execute(
+                    'UPDATE devices SET "GpsCity"=COALESCE(%s,"GpsCity"), '
+                    '"GpsCountry"=COALESCE(%s,"GpsCountry"), '
+                    '"LocationRegion"=COALESCE(%s,"LocationRegion") WHERE "DeviceId"=%s;',
+                    (rcity, rcountry, rregion, device_id))
 
         # Auto-expire timed USB blocking.
         cur.execute('UPDATE devices SET "UsbBlockingEnabled"=false, "UsbBlockingUntil"=NULL '
@@ -1569,6 +1623,65 @@ def report_location():
         cur.close()
         conn.close()
         return jsonify({'success': True}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/devices/<device_id>/refresh-location', methods=['POST'])
+def refresh_device_location(device_id):
+    """Console action: re-run IP geolocation and GPS reverse-geocoding for a device."""
+    key = _resolve_device_key(device_id) or device_id
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT "DeviceId", "PublicIPAddress", "GpsLatitude", "GpsLongitude" '
+                    'FROM devices WHERE "DeviceId"=%s OR "Id"::text=%s LIMIT 1;', (key, str(device_id)))
+        row = cur.fetchone()
+        if not row:
+            cur.close(); conn.close()
+            return jsonify({'error': 'Device not found'}), 404
+        dev_id, pub_ip, gps_lat, gps_lon = row
+
+        if pub_ip:
+            gcity, gregion, gcountry, glat, glon = ip_geolocate(pub_ip)
+            if gcity or gcountry or glat is not None:
+                cur.execute(
+                    'UPDATE devices SET "LocationCity"=COALESCE(%s,"LocationCity"), '
+                    '"LocationRegion"=COALESCE(%s,"LocationRegion"), '
+                    '"LocationCountry"=COALESCE(%s,"LocationCountry"), '
+                    '"Latitude"=COALESCE(%s,"Latitude"), '
+                    '"Longitude"=COALESCE(%s,"Longitude"), '
+                    '"LocationUpdatedAt"=CURRENT_TIMESTAMP WHERE "DeviceId"=%s;',
+                    (gcity, gregion, gcountry, glat, glon, dev_id))
+
+        if gps_lat is not None and gps_lon is not None:
+            rcity, rregion, rcountry = reverse_geocode(gps_lat, gps_lon)
+            if rcity or rcountry:
+                cur.execute(
+                    'UPDATE devices SET "GpsCity"=COALESCE(%s,"GpsCity"), '
+                    '"GpsCountry"=COALESCE(%s,"GpsCountry"), '
+                    '"LocationRegion"=COALESCE(%s,"LocationRegion") WHERE "DeviceId"=%s;',
+                    (rcity, rcountry, rregion, dev_id))
+
+        conn.commit()
+        cur.execute('SELECT "LocationCity","LocationRegion","LocationCountry","Latitude","Longitude",'
+                    '"LocationUpdatedAt","GpsCity","GpsCountry","GpsLatitude","GpsLongitude",'
+                    '"GpsAccuracyMeters","GpsUpdatedAt","PublicIPAddress" FROM devices WHERE "DeviceId"=%s;',
+                    (dev_id,))
+        u = cur.fetchone()
+        cur.close(); conn.close()
+        is_gps = u[8] is not None
+        return jsonify({
+            'locationSource': 'GPS' if is_gps else ('IP' if u[3] is not None else None),
+            'city': u[6] or u[0],
+            'region': u[1],
+            'country': u[7] or u[2],
+            'latitude': u[8] if is_gps else u[3],
+            'longitude': u[9] if is_gps else u[4],
+            'gpsAccuracyMeters': u[10],
+            'locationUpdatedAt': to_iso(u[11] or u[5]),
+            'publicIp': u[12],
+        }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
