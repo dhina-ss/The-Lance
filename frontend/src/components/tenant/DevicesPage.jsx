@@ -1800,15 +1800,22 @@ function fmtSecs(s) {
 	return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
 }
 
-// Label + icon for a session event type (login / sleep / wake).
+// Label + icon for a session event type (login / sleep / wake / startup).
 function sessionEventShown(e) {
-	return ['login', 'lock', 'shutdown', 'alert'].includes((e.type || '').toLowerCase());
+	return ['login', 'lock', 'shutdown', 'alert', 'device_on', 'startup', 'power_on', 'sleep', 'wake', 'unlock'].includes((e.type || '').toLowerCase());
 }
 
 function sessionEventMeta(type) {
 	switch ((type || '').toLowerCase()) {
 		case 'login': return { label: 'Login', icon: 'login', color: 'text-emerald-600' };
+		case 'device_on':
+		case 'startup':
+		case 'power_on': return { label: 'Device On', icon: 'power', color: 'text-cyan-600' };
+		case 'sleep':
+		case 'suspend': return { label: 'Device Sleep', icon: 'bedtime', color: 'text-indigo-500' };
+		case 'wake': return { label: 'Device Woke', icon: 'wb_sunny', color: 'text-sky-500' };
 		case 'lock': return { label: 'Screen locked', icon: 'lock', color: 'text-amber-500' };
+		case 'unlock': return { label: 'Screen unlocked', icon: 'lock_open', color: 'text-blue-500' };
 		case 'shutdown': return { label: 'Shutdown', icon: 'power_settings_new', color: 'text-rose-600' };
 		case 'alert': return { label: 'Manager alerted', icon: 'notifications_active', color: 'text-rose-600' };
 		default: return { label: type || 'Event', icon: 'schedule', color: 'text-on-surface-variant' };

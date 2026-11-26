@@ -271,7 +271,8 @@ def auth_login():
                                        'administrator to release the other device first.',
                         }), 200
                 # Device sign-in -> session log (login at ...).
-                record_session_event(cur, device_id, 'login', row[1])
+                dev_id = device_id or row[4]
+                record_session_event(cur, dev_id, 'login', row[1])
                 conn.commit()
                 cur.close()
                 conn.close()
@@ -925,13 +926,24 @@ def _human_duration(seconds):
 
 
 def record_session_event(cur, device_id, event_type, detail=None, occurred_at=None):
-    """Append a device session event (login / lock / shutdown) and prune anything
-    older than 30 days. When occurred_at is given it is used verbatim (e.g. the
+    """Append a device session event (login / device_on / sleep / wake / lock / shutdown)
+    and prune anything older than 30 days. When occurred_at is given it is used verbatim (e.g. the
     moment a device went offline); otherwise the current time is used.
     Best-effort: never raise into the caller's request."""
     if not device_id:
         return
+    import datetime
     try:
+        # Avoid duplicate events within a 15-second freshness window when occurred_at is None
+        if occurred_at is None:
+            cur.execute('SELECT event_type, occurred_at FROM device_session_events '
+                        'WHERE device_id=%s ORDER BY occurred_at DESC LIMIT 1;', (device_id,))
+            last_ev = cur.fetchone()
+            if last_ev and last_ev[0] == event_type and last_ev[1] is not None:
+                diff = (datetime.datetime.now(datetime.timezone.utc) - last_ev[1]).total_seconds()
+                if diff < 15:
+                    return
+
         if occurred_at is not None:
             cur.execute('INSERT INTO device_session_events (device_id, event_type, detail, occurred_at) '
                         'VALUES (%s,%s,%s,%s);', (device_id, event_type, detail, occurred_at))
@@ -1063,14 +1075,16 @@ def register_device():
 
         # Resolve the activating employee (by code / email / username).
         user_id = None
+        user_name = None
         if activated_by:
             cur.execute(
-                'SELECT "Id" FROM app_users WHERE LOWER("EmployeeCode") = LOWER(%s) '
+                'SELECT "Id", "Username" FROM app_users WHERE LOWER("EmployeeCode") = LOWER(%s) '
                 '   OR LOWER("Email") = LOWER(%s) OR LOWER("Username") = LOWER(%s) LIMIT 1;',
                 (activated_by, activated_by, activated_by))
             r = cur.fetchone()
             if r:
                 user_id = r[0]
+                user_name = r[1]
 
         cur.execute("""
             INSERT INTO devices ("DeviceId","DeviceName","SerialNumber","Manufacturer","Model",
@@ -1105,6 +1119,13 @@ def register_device():
             existing_device = bound[0] if bound else None
             if not existing_device or existing_device == device_id:
                 cur.execute('UPDATE app_users SET "DeviceId" = %s WHERE "Id" = %s;', (device_id, user_id))
+
+        # Record initial login / device_on event if this is a fresh registration or first activation
+        cur.execute("SELECT id FROM device_session_events WHERE device_id=%s AND event_type IN ('login', 'device_on') LIMIT 1;", (device_id,))
+        if not cur.fetchone():
+            record_session_event(cur, device_id, 'device_on', detail=f"Endpoint activated: {data.get('deviceName') or 'Device'}")
+            if user_id is not None:
+                record_session_event(cur, device_id, 'login', detail=user_name or activated_by)
 
         conn.commit()
         cur.close()
@@ -1194,18 +1215,26 @@ def device_heartbeat():
         conn = get_db_connection()
         cur = conn.cursor()
         public_ip = client_public_ip()
-        # Detect a power-off / offline gap: if the previous heartbeat was long
-        # enough ago, the device was shut down (or asleep/offline) in between.
-        # Record a single 'shutdown' entry stamped when it went offline, with how
-        # long it stayed off. (No separate wake entry - the user only wants the
-        # shutdown with its duration.)
-        cur.execute('SELECT "LastHeartbeatTime" FROM devices WHERE "DeviceId"=%s;', (device_id,))
+        # Detect a power-off / offline gap or wake from sleep:
+        # If the device was suspended, log the wake event.
+        # If it was shut down/offline, log the shutdown at the moment it went offline
+        # AND log the device_on event when it powers back on.
+        cur.execute('SELECT "LastHeartbeatTime", "SuspendedAt" FROM devices WHERE "DeviceId"=%s;', (device_id,))
         _prev = cur.fetchone()
         if _prev and _prev[0] is not None:
             gap = (datetime.datetime.now(datetime.timezone.utc) - _prev[0]).total_seconds()
+            was_suspended = _prev[1] is not None
             if gap >= SHUTDOWN_GAP_SECONDS:
-                record_session_event(cur, device_id, 'shutdown',
-                                     detail=_human_duration(gap), occurred_at=_prev[0])
+                if was_suspended:
+                    record_session_event(cur, device_id, 'wake',
+                                         detail=f'Device woke from sleep (asleep for {_human_duration(gap)})')
+                else:
+                    record_session_event(cur, device_id, 'shutdown',
+                                         detail=_human_duration(gap), occurred_at=_prev[0])
+                    record_session_event(cur, device_id, 'device_on',
+                                         detail=f'Device powered on (after {_human_duration(gap)} offline)')
+        elif not _prev or _prev[0] is None:
+            record_session_event(cur, device_id, 'device_on', detail='Endpoint powered on / online')
         cur.execute(
             'UPDATE devices SET "LastSeen"=CURRENT_TIMESTAMP, "LastHeartbeatTime"=CURRENT_TIMESTAMP, '
             '"IPAddress"=COALESCE(%s,"IPAddress"), "Username"=COALESCE(%s,"Username"), '
@@ -1361,6 +1390,7 @@ def report_work_time():
 @app.route('/api/devices/power-state', methods=['POST'])
 def report_power_state():
     """Agent beacon: mark the device as suspended (drives the Sleep status)."""
+    import datetime
     device_id = (request.headers.get('X-Device-Id') or '').strip()
     data = request.get_json() or {}
     suspended = bool(data.get('suspended'))
@@ -1368,11 +1398,19 @@ def report_power_state():
         conn = get_db_connection()
         cur = conn.cursor()
         if suspended:
-            # Marks the Sleep status; the offline period itself is logged as a
-            # 'shutdown' entry (with duration) by the heartbeat gap detection.
+            # Marks the Sleep status and records sleep timeline event
             cur.execute('UPDATE devices SET "SuspendedAt"=CURRENT_TIMESTAMP WHERE "DeviceId"=%s;', (device_id,))
+            record_session_event(cur, device_id, 'sleep', detail='Device entered sleep mode')
         else:
+            # Device resuming / wake from sleep
+            cur.execute('SELECT "SuspendedAt" FROM devices WHERE "DeviceId"=%s;', (device_id,))
+            s_row = cur.fetchone()
+            dur_str = ''
+            if s_row and s_row[0]:
+                sleep_gap = (datetime.datetime.now(datetime.timezone.utc) - s_row[0]).total_seconds()
+                dur_str = f' (asleep for {_human_duration(sleep_gap)})'
             cur.execute('UPDATE devices SET "SuspendedAt"=NULL WHERE "DeviceId"=%s;', (device_id,))
+            record_session_event(cur, device_id, 'wake', detail=f'Device woke from sleep{dur_str}')
         conn.commit()
         cur.close()
         conn.close()

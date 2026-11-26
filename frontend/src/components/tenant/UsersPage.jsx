@@ -3,7 +3,8 @@ import ReactDOM from 'react-dom';
 import {
 	Users, UserPlus, TrendingUp, BadgeCheck, Search, X, Mail, Lock, ShieldCheck, User,
 	Pencil, Trash2, CheckCircle2, AlertTriangle, Eye, EyeOff, Calendar, Clock, Activity,
-	LogIn, Unlock, Power, ChevronDown, Check, FileText, Bell, Laptop, ArrowRight
+	LogIn, Unlock, Power, ChevronDown, Check, FileText, Bell, Laptop, ArrowRight,
+	Moon, Sun
 } from 'lucide-react';
 import { fetchUsers, createUser, updateUser, deleteUser, fetchUserLimit, relativeTime, fetchUserLogs } from '../../api/ems';
 
@@ -96,6 +97,34 @@ function getLogActionMeta(type, detail) {
 				dot: 'bg-emerald-500',
 				desc: detail ? `User signed in: ${detail}` : 'Employee signed in to endpoint session',
 			};
+		case 'device_on':
+		case 'startup':
+		case 'power_on':
+			return {
+				action: 'Device On',
+				icon: Power,
+				color: 'text-cyan-600 bg-cyan-500/10 border-cyan-500/20',
+				dot: 'bg-cyan-500',
+				desc: detail || 'Endpoint powered on and online',
+			};
+		case 'sleep':
+		case 'suspend':
+			return {
+				action: 'Device Sleep',
+				icon: Moon,
+				color: 'text-indigo-600 bg-indigo-500/10 border-indigo-500/20',
+				dot: 'bg-indigo-500',
+				desc: detail || 'Endpoint entered sleep / standby mode',
+			};
+		case 'wake':
+		case 'resume':
+			return {
+				action: 'Device Woke',
+				icon: Sun,
+				color: 'text-sky-600 bg-sky-500/10 border-sky-500/20',
+				dot: 'bg-sky-500',
+				desc: detail || 'Endpoint resumed from sleep / standby',
+			};
 		case 'lock':
 			return {
 				action: 'Screen Locked',
@@ -105,7 +134,6 @@ function getLogActionMeta(type, detail) {
 				desc: detail ? `Screen locked: ${detail}` : 'Inactivity timeout auto-lock / user screen locked',
 			};
 		case 'unlock':
-		case 'wake':
 			return {
 				action: 'Screen Unlocked',
 				icon: Unlock,
@@ -143,7 +171,7 @@ function getLogActionMeta(type, detail) {
 				icon: Activity,
 				color: 'text-primary bg-primary/10 border-primary/20',
 				dot: 'bg-primary',
-				desc: detail || 'Activity recorded on endpoint',
+				desc: detail || 'Endpoint activity event recorded',
 			};
 	}
 }
