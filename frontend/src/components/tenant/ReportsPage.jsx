@@ -231,18 +231,33 @@ function formatTimeDetailLabel(evType, durationMs, rawDetail, hasNext) {
 	return d || cleanDetail || '—';
 }
 
-function countWorkingDaysExcludingSunday(startDate, endDate) {
-	const cur = new Date(`${startDate}T00:00:00`);
-	const end = new Date(`${endDate}T00:00:00`);
-	if (isNaN(cur.getTime()) || isNaN(end.getTime()) || cur > end) return 0;
+function computeExpectedWorkingMs(startDate, endDate, firstLogMs, periodEndMs) {
+	const rangeStartMs = new Date(`${startDate}T00:00:00`).getTime();
+	const effStartMs = firstLogMs != null ? Math.max(rangeStartMs, firstLogMs) : rangeStartMs;
+	if (effStartMs > periodEndMs) return { expectedMs: 0, workingDays: 0 };
+
+	const startDayStr = toLocalDateStr(new Date(effStartMs));
+	const endDayStr = toLocalDateStr(new Date(periodEndMs));
+	const cur = new Date(`${startDayStr}T00:00:00`);
+	const end = new Date(`${endDayStr}T00:00:00`);
+
+	let expectedMs = 0;
 	let workingDays = 0;
 	while (cur <= end) {
 		if (cur.getDay() !== 0) {
-			workingDays++;
+			const curStr = toLocalDateStr(cur);
+			const dayStart = curStr === startDayStr ? effStartMs : cur.getTime();
+			const dayEnd = curStr === endDayStr ? periodEndMs : new Date(`${curStr}T23:59:59.999`).getTime();
+			const dayElapsed = Math.max(0, dayEnd - dayStart);
+			const dayExpected = Math.min(8 * 3600000, dayElapsed);
+			if (dayExpected > 0) {
+				expectedMs += dayExpected;
+				workingDays++;
+			}
 		}
 		cur.setDate(cur.getDate() + 1);
 	}
-	return workingDays;
+	return { expectedMs, workingDays };
 }
 
 function computeActivityForDevice(evList, startDate, endDate) {
@@ -277,34 +292,26 @@ function computeActivityForDevice(evList, startDate, endDate) {
 		detailByOrigIdx.set(origIdx, formatTimeDetailLabel(t, durationMs, ev.detail, hasNext));
 	}
 
-	const workingDays = countWorkingDaysExcludingSunday(startDate, endDate);
-	const expectedHours = workingDays * 8;
-	const expectedMs = expectedHours * 3600000;
+	const firstLogEntry = asc.find((x) => !Number.isNaN(x.ts));
+	const firstLogMs = firstLogEntry ? firstLogEntry.ts : null;
+	const { expectedMs, workingDays } = computeExpectedWorkingMs(startDate, endDate, firstLogMs, endMs);
 	const workingHoursPercent = expectedMs > 0 ? `${((activeMs / expectedMs) * 100).toFixed(1)}%` : '0.0%';
+	const actualWorkingLabel = firstLogMs != null
+		? `${formatDurationHm(expectedMs)} (from ${formatDate(new Date(firstLogMs).toISOString())})`
+		: `${formatDurationHm(expectedMs)} (${workingDays} ${workingDays === 1 ? 'day' : 'days'} × 8h)`;
 
 	return {
 		totalActiveHours: formatDurationHm(activeMs),
 		totalInactiveHours: formatDurationHm(inactiveMs),
-		actualWorkingHours: `${expectedHours} hrs (${workingDays} ${workingDays === 1 ? 'day' : 'days'} × 8h)`,
+		actualWorkingHours: actualWorkingLabel,
 		workingHoursPercent,
 		detailByOrigIdx,
 	};
 }
 
-function makeUniqueSheetName(userName, model, usedNames) {
+function makeUniqueSheetName(userName, usedNames) {
 	const clean = (s) => String(s || '').replace(/[\\/?*[\]:]/g, ' ').replace(/\s+/g, ' ').trim();
-	const u = clean(userName) || 'User';
-	const m = clean(model);
-	let base = m && m !== '—' ? `${u} - ${m}` : u;
-	if (base.length > 31) {
-		if (m && m !== '—') {
-			const maxU = Math.min(u.length, 15);
-			const rem = 31 - maxU - 3;
-			base = rem > 3 ? `${u.slice(0, maxU).trim()}` : base.slice(0, 31).trim();
-		} else {
-			base = base.slice(0, 31).trim();
-		}
-	}
+	const base = (clean(userName) || 'User').slice(0, 31).trim();
 	let candidate = base || 'Sheet';
 	let counter = 2;
 	while (usedNames.has(candidate.toLowerCase())) {
@@ -927,7 +934,7 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 					];
 				});
 				sheets.push({
-					sheetName: makeUniqueSheetName(item?.userName || evList[0]?.userName || evList[0]?.osUsername, item?.model, usedNames),
+					sheetName: makeUniqueSheetName(item?.userName || evList[0]?.userName || evList[0]?.osUsername, usedNames),
 					headers,
 					rows,
 					centerCols: [0],
@@ -984,7 +991,7 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 					dev.status || 'Offline',
 				];
 				return {
-					sheetName: makeUniqueSheetName(item?.userName || dev.userName || dev.user, item?.model || dev.model, usedNames),
+					sheetName: makeUniqueSheetName(item?.userName || dev.userName || dev.user, usedNames),
 					headers,
 					rows: [row],
 					centerCols: [0, 3, 9, 10],
