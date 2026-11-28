@@ -182,6 +182,94 @@ function buildLocationSummary(deviceId, fallbackLocation, startDate, endDate, lo
 	};
 }
 
+const ACTIVE_EVENT_TYPES = new Set(['login', 'device_on', 'startup', 'power_on', 'wake', 'resume', 'unlock']);
+const INACTIVE_EVENT_TYPES = new Set(['sleep', 'suspend', 'lock', 'shutdown', 'logoff', 'logout']);
+
+function formatDurationHm(ms) {
+	const totalMins = Math.max(0, Math.round(ms / 60000));
+	const hrs = Math.floor(totalMins / 60);
+	const mins = totalMins % 60;
+	if (hrs === 0) return `${mins}m`;
+	return `${hrs}h ${mins}m`;
+}
+
+function formatTimeDetailLabel(evType, durationMs, rawDetail, hasNext) {
+	const t = (evType || '').toLowerCase();
+	const cleanDetail = (rawDetail || '').trim();
+	const durStr = durationMs != null && durationMs >= 0 ? formatDurationHm(durationMs) : null;
+	const secs = durationMs != null ? Math.round(durationMs / 1000) : null;
+
+	const fmtDur = () => {
+		if (secs != null && secs < 60) return `${Math.max(1, secs)} sec`;
+		if (durStr) return durStr;
+		return null;
+	};
+	const d = fmtDur();
+
+	if (t === 'sleep' || t === 'suspend') {
+		if (d && secs >= 60) return `${d} sleep (more than 1 min)`;
+		if (d) return `${d} sleep`;
+		return cleanDetail || 'More than 1 min sleep';
+	}
+	if (t === 'lock') {
+		if (d) return `${d} locked`;
+		return cleanDetail || 'Screen locked';
+	}
+	if (t === 'shutdown') {
+		if (cleanDetail && /^\d+[dhm](\s+\d+[hm])?$/i.test(cleanDetail)) return `${cleanDetail} offline`;
+		if (d) return `${d} offline`;
+		return cleanDetail || 'Powered off';
+	}
+	if (t === 'logoff' || t === 'logout') {
+		if (d) return `${d} logged off`;
+		return cleanDetail || 'Signed off';
+	}
+	if (ACTIVE_EVENT_TYPES.has(t)) {
+		if (d) return hasNext ? `${d} active` : `${d} active (ongoing)`;
+		return cleanDetail || 'Active';
+	}
+	return d || cleanDetail || '—';
+}
+
+function computeActivityForDevice(evList, startDate, endDate) {
+	const startMs = new Date(`${startDate}T00:00:00`).getTime();
+	const endMs = Math.min(Date.now(), new Date(`${endDate}T23:59:59.999`).getTime());
+
+	const asc = [...evList]
+		.map((ev, origIdx) => ({ ev, origIdx, ts: ev.at ? Date.parse(ev.at) : NaN }))
+		.sort((a, b) => (Number.isNaN(a.ts) ? 0 : a.ts) - (Number.isNaN(b.ts) ? 0 : b.ts));
+
+	let activeMs = 0;
+	let inactiveMs = 0;
+	const detailByOrigIdx = new Map();
+
+	for (let i = 0; i < asc.length; i++) {
+		const { ev, origIdx, ts } = asc[i];
+		const t = (ev.type || '').toLowerCase();
+		const hasNext = i + 1 < asc.length && !Number.isNaN(asc[i + 1].ts);
+		let durationMs = null;
+
+		if (!Number.isNaN(ts)) {
+			const nextTs = hasNext ? asc[i + 1].ts : endMs;
+			const clampedStart = Math.max(ts, startMs);
+			const clampedEnd = Math.min(nextTs, endMs);
+			if (clampedEnd >= clampedStart) {
+				durationMs = clampedEnd - clampedStart;
+				if (ACTIVE_EVENT_TYPES.has(t)) activeMs += durationMs;
+				else if (INACTIVE_EVENT_TYPES.has(t)) inactiveMs += durationMs;
+			}
+		}
+
+		detailByOrigIdx.set(origIdx, formatTimeDetailLabel(t, durationMs, ev.detail, hasNext));
+	}
+
+	return {
+		totalActiveHours: formatDurationHm(activeMs),
+		totalInactiveHours: formatDurationHm(inactiveMs),
+		detailByOrigIdx,
+	};
+}
+
 function makeUniqueSheetName(userName, model, usedNames) {
 	const clean = (s) => String(s || '').replace(/[\\/?*[\]:]/g, ' ').replace(/\s+/g, ' ').trim();
 	const u = clean(userName) || 'User';
@@ -258,6 +346,15 @@ function buildStyledWorksheet(headers, rows, centerCols = [0], summaryBlock = nu
 					? 'Varied across selected dates (Date-wise below)'
 					: item.locationInfo.text,
 			]));
+			if (item.totalActiveHours != null || item.totalInactiveHours != null) {
+				keyValRowIndices.add(preRows.length);
+				preRows.push(pad([
+					'Total Active Hours',
+					item.totalActiveHours || '0m',
+					'Total Inactive Hours',
+					item.totalInactiveHours || '0m',
+				]));
+			}
 
 			if (item.locationInfo.varied && item.locationInfo.entries.length > 0) {
 				const locSec = new Array(colCount).fill('');
@@ -697,12 +794,25 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 	const safePage = Math.min(currentPage, totalPages);
 	const paginated = activeList.slice((safePage - 1) * pageSize, safePage * pageSize);
 
-	// Summary details for the active report (User name, emp code, mail address, device type, model, ip, location / date-wise location)
+	// Summary details for the active report (User name, emp code, mail address, device type, model, ip, location / date-wise location, active/inactive hours)
 	const summaryItems = useMemo(() => {
 		const deviceById = new Map();
 		for (const d of devices) {
 			if (d.deviceId) deviceById.set(d.deviceId, d);
 		}
+		const logsByKey = new Map();
+		const startMs = new Date(`${startDate}T00:00:00`).getTime();
+		const endMs = new Date(`${endDate}T23:59:59.999`).getTime();
+		for (const ev of userLogs) {
+			if (ev.at) {
+				const ts = Date.parse(ev.at);
+				if (!Number.isNaN(ts) && (ts < startMs || ts > endMs)) continue;
+			}
+			const k = ev.deviceId || ev.userEmail || ev.userName || ev.osUsername || 'unknown';
+			if (!logsByKey.has(k)) logsByKey.set(k, []);
+			logsByKey.get(k).push(ev);
+		}
+
 		if (activeCard === 'user-logs') {
 			const seen = new Map();
 			for (const ev of filteredUserLogs) {
@@ -710,15 +820,18 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 				const key = ev.deviceId || ev.userEmail || ev.userName || ev.osUsername || 'unknown';
 				if (seen.has(key)) continue;
 				const fallbackLoc = dev?.locationLabel || [dev?.city, dev?.region, dev?.country].filter(Boolean).join(', ') || '—';
+				const activity = computeActivityForDevice(logsByKey.get(key) || [], startDate, endDate);
 				seen.set(key, {
 					key,
 					userName: ev.userName || dev?.userName || ev.osUsername || '—',
 					empCode: ev.empCode || dev?.empCode || '—',
-					mailAddress: ev.userEmail || (dev?.user && dev.user.includes('@') ? dev.user : '—'),
 					deviceName: ev.deviceName || dev?.name || '—',
+					mailAddress: ev.userEmail || (dev?.user && dev.user.includes('@') ? dev.user : '—'),
 					deviceType: getDeviceTypeLabel(dev),
 					model: dev?.model || '—',
 					ipAddress: dev?.ip || '—',
+					totalActiveHours: activity.totalActiveHours,
+					totalInactiveHours: activity.totalInactiveHours,
 					locationInfo: buildLocationSummary(ev.deviceId, fallbackLoc, startDate, endDate, locationHistory),
 				});
 			}
@@ -727,6 +840,7 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 		if (activeCard === 'device-report') {
 			return filteredDevices.map((dev) => {
 				const fallbackLoc = dev.locationLabel || [dev.city, dev.region, dev.country].filter(Boolean).join(', ') || '—';
+				const activity = computeActivityForDevice(logsByKey.get(dev.deviceId) || [], startDate, endDate);
 				return {
 					key: dev.deviceId || dev.id,
 					userName: dev.userName || dev.user || '—',
@@ -736,18 +850,20 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 					deviceType: getDeviceTypeLabel(dev),
 					model: dev.model || '—',
 					ipAddress: dev.ip || '—',
+					totalActiveHours: activity.totalActiveHours,
+					totalInactiveHours: activity.totalInactiveHours,
 					locationInfo: buildLocationSummary(dev.deviceId, fallbackLoc, startDate, endDate, locationHistory),
 				};
 			});
 		}
 		return [];
-	}, [activeCard, filteredUserLogs, filteredDevices, devices, startDate, endDate, locationHistory]);
+	}, [activeCard, filteredUserLogs, filteredDevices, userLogs, devices, startDate, endDate, locationHistory]);
 
 	const handleExportUserLogs = async () => {
 		if (exportingKind) return;
 		setExportingKind('user-logs');
 		try {
-			const headers = ['S.No', 'User Name', 'Employee Code', 'Email', 'Device Name', 'OS User', 'Event', 'Details', 'Timestamp'];
+			const headers = ['S.No', 'Event', 'Details', 'Timestamp'];
 			const fileStartDate = formatDDMMYYYY(startDate);
 			const fileEndDate = formatDDMMYYYY(endDate);
 			const fileName = `User_Logs_Report_${fileStartDate}_to_${fileEndDate}.xlsx`;
@@ -766,17 +882,13 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 			const sheets = [];
 			for (const [key, evList] of logsByKey.entries()) {
 				const item = summaryByKey.get(key);
+				const activity = computeActivityForDevice(evList, startDate, endDate);
 				const rows = evList.map((ev, idx) => {
 					const meta = getEventMeta(ev.type, ev.detail);
 					return [
 						idx + 1,
-						ev.userName || ev.osUsername || '—',
-						ev.empCode || '—',
-						ev.userEmail || '—',
-						ev.deviceName || '—',
-						ev.osUsername || '—',
 						meta.label,
-						meta.desc,
+						activity.detailByOrigIdx.get(idx) || '—',
 						formatDate(ev.at),
 					];
 				});
@@ -784,7 +896,7 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 					sheetName: makeUniqueSheetName(item?.userName || evList[0]?.userName || evList[0]?.osUsername, item?.model, usedNames),
 					headers,
 					rows,
-					centerCols: [0, 2, 6],
+					centerCols: [0],
 					summaryBlock: item ? { title: reportTitle, items: [item] } : null,
 				});
 			}
@@ -794,7 +906,7 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 					sheetName: 'User Logs Report',
 					headers,
 					rows: [],
-					centerCols: [0, 2, 6],
+					centerCols: [0],
 					summaryBlock: { title: reportTitle, items: [] },
 				});
 			}
