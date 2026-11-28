@@ -2709,8 +2709,10 @@ def get_user_session_events(user_id):
 def get_all_user_logs_report():
     """Unified session & activity logs across all users/devices (default last 30 days)."""
     try:
-        days = max(1, min(90, int(request.args.get('days', 30) or 30)))
-        limit = max(1, min(2000, int(request.args.get('limit', 500) or 500)))
+        days = max(1, min(365, int(request.args.get('days', 30) or 30)))
+        limit = max(1, min(5000, int(request.args.get('limit', 1000) or 1000)))
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
         conn = get_db_connection()
         cur = conn.cursor()
         sweep_stale_device_statuses(cur)
@@ -2721,24 +2723,44 @@ def get_all_user_logs_report():
             conn.close()
             return jsonify([]), 200
 
-        cur.execute("""
-            SELECT e.id, e.device_id, e.event_type, e.detail, e.occurred_at,
-                   d."DeviceName", d."Username" AS os_username,
-                   u."Id" AS user_id, u."Username" AS user_name,
-                   u."Email" AS user_email, u."EmployeeCode" AS emp_code
-            FROM device_session_events e
-            LEFT JOIN devices d ON d."DeviceId" = e.device_id
-            LEFT JOIN LATERAL (
-                SELECT "Id", "Username", "Email", "EmployeeCode"
-                FROM app_users
-                WHERE "Id"::text = d."ActivatedByUserId" OR "DeviceId" = e.device_id
-                ORDER BY CASE WHEN "Id"::text = d."ActivatedByUserId" THEN 0 ELSE 1 END
-                LIMIT 1
-            ) u ON true
-            WHERE e.occurred_at >= CURRENT_TIMESTAMP - (%s || ' days')::interval
-            ORDER BY e.occurred_at DESC, e.id DESC
-            LIMIT %s;
-        """, (str(days), limit))
+        if start_date and end_date:
+            cur.execute("""
+                SELECT e.id, e.device_id, e.event_type, e.detail, e.occurred_at,
+                       d."DeviceName", d."Username" AS os_username,
+                       u."Id" AS user_id, u."Username" AS user_name,
+                       u."Email" AS user_email, u."EmployeeCode" AS emp_code
+                FROM device_session_events e
+                LEFT JOIN devices d ON d."DeviceId" = e.device_id
+                LEFT JOIN LATERAL (
+                    SELECT "Id", "Username", "Email", "EmployeeCode"
+                    FROM app_users
+                    WHERE "Id"::text = d."ActivatedByUserId" OR "DeviceId" = e.device_id
+                    ORDER BY CASE WHEN "Id"::text = d."ActivatedByUserId" THEN 0 ELSE 1 END
+                    LIMIT 1
+                ) u ON true
+                WHERE e.occurred_at >= %s::timestamp AND e.occurred_at < (%s::date + interval '1 day')
+                ORDER BY e.occurred_at DESC, e.id DESC
+                LIMIT %s;
+            """, (start_date, end_date, limit))
+        else:
+            cur.execute("""
+                SELECT e.id, e.device_id, e.event_type, e.detail, e.occurred_at,
+                       d."DeviceName", d."Username" AS os_username,
+                       u."Id" AS user_id, u."Username" AS user_name,
+                       u."Email" AS user_email, u."EmployeeCode" AS emp_code
+                FROM device_session_events e
+                LEFT JOIN devices d ON d."DeviceId" = e.device_id
+                LEFT JOIN LATERAL (
+                    SELECT "Id", "Username", "Email", "EmployeeCode"
+                    FROM app_users
+                    WHERE "Id"::text = d."ActivatedByUserId" OR "DeviceId" = e.device_id
+                    ORDER BY CASE WHEN "Id"::text = d."ActivatedByUserId" THEN 0 ELSE 1 END
+                    LIMIT 1
+                ) u ON true
+                WHERE e.occurred_at >= CURRENT_TIMESTAMP - (%s || ' days')::interval
+                ORDER BY e.occurred_at DESC, e.id DESC
+                LIMIT %s;
+            """, (str(days), limit))
         rows = cur.fetchall()
         cur.close()
         conn.close()

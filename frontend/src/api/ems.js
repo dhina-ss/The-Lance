@@ -429,9 +429,17 @@ export async function fetchUserLogs(userId, deviceId) {
   return [];
 }
 
-export async function fetchAllUserLogs(days = 30, limit = 500) {
+export async function fetchAllUserLogs(days = 30, limit = 1000, startDate = null, endDate = null) {
   try {
-    const data = await getJson(`/api/reports/user-logs?days=${encodeURIComponent(days)}&limit=${encodeURIComponent(limit)}`);
+    const params = new URLSearchParams();
+    if (startDate && endDate) {
+      params.set('start_date', startDate);
+      params.set('end_date', endDate);
+    } else {
+      params.set('days', days);
+    }
+    params.set('limit', limit);
+    const data = await getJson(`/api/reports/user-logs?${params.toString()}`);
     if (Array.isArray(data)) return data;
   } catch {
     // Fallback if backend route is deploying: stitch from users list

@@ -29,6 +29,7 @@ import {
 	Filter,
 	Check,
 	Calendar,
+	X,
 } from 'lucide-react';
 import { fetchAllUserLogs, fetchDevices, fetchUsers, formatDate, relativeTime } from '../../api/ems';
 
@@ -181,6 +182,76 @@ function exportStyledSheet(sheetName, fileName, headers, rows, centerCols = [0])
 	XLSX.writeFile(wb, fileName);
 }
 
+function formatDDMMYYYY(dateInput) {
+	if (!dateInput || dateInput === '—') return '—';
+	if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
+		const [y, m, d] = dateInput.slice(0, 10).split('-');
+		return `${d}-${m}-${y}`;
+	}
+	const d = new Date(dateInput);
+	if (isNaN(d.getTime())) return String(dateInput);
+	const day = String(d.getDate()).padStart(2, '0');
+	const month = String(d.getMonth() + 1).padStart(2, '0');
+	const year = d.getFullYear();
+	return `${day}-${month}-${year}`;
+}
+
+function toLocalDateStr(d = new Date()) {
+	const year = d.getFullYear();
+	const month = String(d.getMonth() + 1).padStart(2, '0');
+	const day = String(d.getDate()).padStart(2, '0');
+	return `${year}-${month}-${day}`;
+}
+
+const DATE_PRESETS = [
+	{ id: 'today', label: 'Today' },
+	{ id: 'yesterday', label: 'Yesterday' },
+	{ id: '7d', label: 'Last 7 Days' },
+	{ id: '30d', label: 'Last 30 Days' },
+	{ id: 'this_month', label: 'This Month' },
+	{ id: 'last_month', label: 'Last Month' },
+	{ id: 'custom', label: 'Custom Range' },
+];
+
+function getPresetRange(preset) {
+	const today = new Date();
+	const todayStr = toLocalDateStr(today);
+	if (preset === 'today') {
+		return { start: todayStr, end: todayStr };
+	}
+	if (preset === 'yesterday') {
+		const yest = new Date(today);
+		yest.setDate(yest.getDate() - 1);
+		const yestStr = toLocalDateStr(yest);
+		return { start: yestStr, end: yestStr };
+	}
+	if (preset === '7d') {
+		const d = new Date(today);
+		d.setDate(d.getDate() - 6);
+		return { start: toLocalDateStr(d), end: todayStr };
+	}
+	if (preset === '30d') {
+		const d = new Date(today);
+		d.setDate(d.getDate() - 29);
+		return { start: toLocalDateStr(d), end: todayStr };
+	}
+	if (preset === 'this_month') {
+		const first = new Date(today.getFullYear(), today.getMonth(), 1);
+		return { start: toLocalDateStr(first), end: todayStr };
+	}
+	if (preset === 'last_month') {
+		const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+		const last = new Date(today.getFullYear(), today.getMonth(), 0);
+		return { start: toLocalDateStr(first), end: toLocalDateStr(last) };
+	}
+	return { start: todayStr, end: todayStr };
+}
+
+const MONTH_NAMES = [
+	'January', 'February', 'March', 'April', 'May', 'June',
+	'July', 'August', 'September', 'October', 'November', 'December',
+];
+
 const EVENT_FILTER_OPTIONS = [
 	{ id: 'ALL', label: 'All Events', dot: 'bg-primary', icon: Filter },
 	{ id: 'login', label: 'User Login', dot: 'bg-emerald-500', icon: LogIn },
@@ -205,7 +276,20 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 
 	// Filters & pagination
 	const [searchTerm, setSearchTerm] = useState('');
-	const [daysWindow, setDaysWindow] = useState(30); // 1 | 7 | 30
+	const [datePreset, setDatePreset] = useState('7d');
+	const [startDate, setStartDate] = useState(() => {
+		const d = new Date();
+		d.setDate(d.getDate() - 6);
+		return toLocalDateStr(d);
+	});
+	const [endDate, setEndDate] = useState(() => toLocalDateStr(new Date()));
+	const [isDateDropdownOpen, setIsDateDropdownOpen] = useState(false);
+	const dateDropdownRef = useRef(null);
+	const [calMonth, setCalMonth] = useState(() => new Date().getMonth());
+	const [calYear, setCalYear] = useState(() => new Date().getFullYear());
+	const [selectPhase, setSelectPhase] = useState('start'); // 'start' | 'end'
+	const [deviceDateFilterMode, setDeviceDateFilterMode] = useState('all'); // 'all' | 'range'
+
 	const [eventFilter, setEventFilter] = useState('ALL');
 	const [isEventDropdownOpen, setIsEventDropdownOpen] = useState(false);
 	const eventDropdownRef = useRef(null);
@@ -219,19 +303,51 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 			if (eventDropdownRef.current && !eventDropdownRef.current.contains(e.target)) {
 				setIsEventDropdownOpen(false);
 			}
+			if (dateDropdownRef.current && !dateDropdownRef.current.contains(e.target)) {
+				setIsDateDropdownOpen(false);
+			}
 		};
 		document.addEventListener('mousedown', handleOutsideClick);
 		return () => document.removeEventListener('mousedown', handleOutsideClick);
 	}, []);
 
-	const loadAll = async (silent = false, days = daysWindow) => {
+	const handleDayClick = (dayStr) => {
+		setDatePreset('custom');
+		if (selectPhase === 'start' || dayStr < startDate) {
+			setStartDate(dayStr);
+			setEndDate(dayStr);
+			setSelectPhase('end');
+		} else {
+			setEndDate(dayStr);
+			setSelectPhase('start');
+		}
+	};
+
+	const handlePresetClick = (preset) => {
+		setDatePreset(preset);
+		if (preset !== 'custom') {
+			const range = getPresetRange(preset);
+			setStartDate(range.start);
+			setEndDate(range.end);
+			setSelectPhase('start');
+			const s = new Date(range.start);
+			if (!isNaN(s.getTime())) {
+				setCalMonth(s.getMonth());
+				setCalYear(s.getFullYear());
+			}
+			setIsDateDropdownOpen(false);
+		}
+	};
+
+	const loadAll = async (silent = false, start = startDate, end = endDate) => {
 		if (!silent) setLoading(true);
 		else setRefreshing(true);
 		try {
+			const diffDays = Math.max(1, Math.ceil((new Date(`${end}T23:59:59`).getTime() - new Date(`${start}T00:00:00`).getTime()) / (1000 * 86400)));
 			const [devs, usrs, logs] = await Promise.all([
 				fetchDevices().catch(() => []),
 				fetchUsers().catch(() => []),
-				fetchAllUserLogs(days, 600).catch(() => []),
+				fetchAllUserLogs(diffDays, 1500, start, end).catch(() => []),
 			]);
 			setDevices(devs || []);
 			setUsers(usrs || []);
@@ -246,14 +362,14 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 	};
 
 	useEffect(() => {
-		loadAll(false, daysWindow);
-		const timer = setInterval(() => loadAll(true, daysWindow), 30000);
+		loadAll(false, startDate, endDate);
+		const timer = setInterval(() => loadAll(true, startDate, endDate), 30000);
 		return () => clearInterval(timer);
-	}, [daysWindow]);
+	}, [startDate, endDate]);
 
 	useEffect(() => {
 		setCurrentPage(1);
-	}, [activeCard, searchTerm, eventFilter, deviceStatusFilter, daysWindow]);
+	}, [activeCard, searchTerm, eventFilter, deviceStatusFilter, deviceDateFilterMode, startDate, endDate]);
 
 	const notify = (msg) => {
 		setToast(msg);
@@ -262,7 +378,7 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 
 	// Card summary stats
 	const logStats = useMemo(() => {
-		const todayPrefix = new Date().toISOString().slice(0, 10);
+		const todayPrefix = toLocalDateStr();
 		let todayCount = 0;
 		let loginCount = 0;
 		let sleepWakeCount = 0;
@@ -293,14 +409,15 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 		return { total, online, sleep, offline, optimal };
 	}, [devices]);
 
-	// Filtered rows
+	// Filtered rows - strictly honors selected start and end dates
 	const filteredUserLogs = useMemo(() => {
 		const q = searchTerm.trim().toLowerCase();
-		const cutoffMs = Date.now() - daysWindow * 86400 * 1000;
+		const startMs = new Date(`${startDate}T00:00:00`).getTime();
+		const endMs = new Date(`${endDate}T23:59:59.999`).getTime();
 		return userLogs.filter((ev) => {
 			if (ev.at) {
 				const ts = Date.parse(ev.at);
-				if (!Number.isNaN(ts) && ts < cutoffMs) return false;
+				if (!Number.isNaN(ts) && (ts < startMs || ts > endMs)) return false;
 			}
 			const evType = (ev.type || '').toLowerCase();
 			if (eventFilter !== 'ALL') {
@@ -316,7 +433,7 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 				.filter(Boolean)
 				.some((v) => String(v).toLowerCase().includes(q));
 		});
-	}, [userLogs, searchTerm, eventFilter, daysWindow]);
+	}, [userLogs, searchTerm, eventFilter, startDate, endDate]);
 
 	const filteredDevices = useMemo(() => {
 		const q = searchTerm.trim().toLowerCase();
@@ -324,12 +441,23 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 			if (deviceStatusFilter !== 'ALL' && (d.status || '').toLowerCase() !== deviceStatusFilter.toLowerCase()) {
 				return false;
 			}
+			if (deviceDateFilterMode === 'range') {
+				const rawDate = d.registrationDate || d.createdDate || '';
+				if (rawDate) {
+					let formatted = rawDate.slice(0, 10);
+					if (/^\d{2}-\d{2}-\d{4}$/.test(formatted)) {
+						const [dd, mm, yyyy] = formatted.split('-');
+						formatted = `${yyyy}-${mm}-${dd}`;
+					}
+					if (formatted < startDate || formatted > endDate) return false;
+				}
+			}
 			if (!q) return true;
 			return [d.name, d.model, d.userName, d.user, d.empCode, d.ip, d.os, d.locationLabel]
 				.filter(Boolean)
 				.some((v) => String(v).toLowerCase().includes(q));
 		});
-	}, [devices, searchTerm, deviceStatusFilter]);
+	}, [devices, searchTerm, deviceStatusFilter, deviceDateFilterMode, startDate, endDate]);
 
 	const activeList = activeCard === 'user-logs'
 		? filteredUserLogs
@@ -359,9 +487,11 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 					formatDate(ev.at),
 				];
 			});
-			const stamp = new Date().toISOString().slice(0, 10);
-			exportStyledSheet('User Logs Report', `User_Logs_Report_${stamp}.xlsx`, headers, rows, [0, 2, 6]);
-			notify(`Exported ${rows.length} user log entries to Excel.`);
+			const fileStartDate = formatDDMMYYYY(startDate);
+			const fileEndDate = formatDDMMYYYY(endDate);
+			const fileName = `User_Logs_Report_${fileStartDate}_to_${fileEndDate}.xlsx`;
+			exportStyledSheet('User Logs Report', fileName, headers, rows, [0, 2, 6]);
+			notify(`Exported ${rows.length} user log entries (${fileStartDate} to ${fileEndDate}) to Excel.`);
 		} catch {
 			notify('Failed to export user logs.');
 		} finally {
@@ -384,15 +514,17 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 					dev.os || '—',
 					dev.locationLabel || dev.city || dev.country || '—',
 					dev.ip || '—',
-					dev.registrationDate || '—',
+					formatDDMMYYYY(dev.registrationDate),
 					dev.networkTotal || '—',
 					cond.label,
 					dev.status || 'Offline',
 				];
 			});
-			const stamp = new Date().toISOString().slice(0, 10);
-			exportStyledSheet('Device Report', `Device_Report_${stamp}.xlsx`, headers, rows, [0, 3, 9, 10]);
-			notify(`Exported ${rows.length} device report rows to Excel.`);
+			const fileStartDate = formatDDMMYYYY(startDate);
+			const fileEndDate = formatDDMMYYYY(endDate);
+			const fileName = `Device_Report_${fileStartDate}_to_${fileEndDate}.xlsx`;
+			exportStyledSheet('Device Report', fileName, headers, rows, [0, 3, 9, 10]);
+			notify(`Exported ${rows.length} device report rows (${fileStartDate} to ${fileEndDate}) to Excel.`);
 		} catch {
 			notify('Failed to export device report.');
 		} finally {
@@ -498,14 +630,14 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 							</h2>
 							<p className="text-xs text-muted-foreground mt-0.5">
 								{activeCard === 'user-logs'
-									? `Showing ${filteredUserLogs.length} session event(s) over the last ${daysWindow === 1 ? '24 hours' : `${daysWindow} days`}`
-									: `Showing ${filteredDevices.length} of ${devices.length} enrolled endpoint device(s)`}
+									? `Showing ${filteredUserLogs.length} session event(s) from ${formatDDMMYYYY(startDate)} to ${formatDDMMYYYY(endDate)}`
+									: `Showing ${filteredDevices.length} of ${devices.length} enrolled endpoint device(s)${deviceDateFilterMode === 'range' ? ` (registered ${formatDDMMYYYY(startDate)} to ${formatDDMMYYYY(endDate)})` : ''}`}
 							</p>
 						</div>
 						<div className="flex flex-wrap items-center gap-2">
 							<button
 								type="button"
-								onClick={() => loadAll(true, daysWindow)}
+								onClick={() => loadAll(true, startDate, endDate)}
 								className="px-3.5 py-2 bg-background border border-input text-primary hover:bg-slate-100 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
 							>
 								<RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} /> Refresh
@@ -515,9 +647,10 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 								onClick={activeCard === 'user-logs' ? handleExportUserLogs : handleExportDeviceReport}
 								disabled={!!exportingKind}
 								className="px-4 py-2 bg-accent text-on-primary font-bold text-xs rounded-xl hover:bg-primary/90 hover:text-white transition-all cursor-pointer flex items-center gap-2 shadow-sm disabled:opacity-60"
+								title={`Download ${activeCard === 'user-logs' ? 'user logs' : 'device report'} for ${formatDDMMYYYY(startDate)} to ${formatDDMMYYYY(endDate)}`}
 							>
 								{exportingKind ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-								<span>Export</span>
+								<span>Export ({formatDDMMYYYY(startDate)} to {formatDDMMYYYY(endDate)})</span>
 							</button>
 						</div>
 					</div>
@@ -538,27 +671,170 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 							/>
 						</div>
 
-						{activeCard === 'user-logs' ? (
-							<div className="flex flex-wrap items-center gap-2 shrink-0">
-								<div className="flex items-center gap-1 bg-slate-100/90 border border-outline-variant/40 rounded-xl p-1">
-									{[
-										{ label: 'Today', val: 1 },
-										{ label: '7 Days', val: 7 },
-										{ label: '30 Days', val: 30 },
-									].map((d) => (
-										<button
-											key={d.val}
-											type="button"
-											onClick={() => setDaysWindow(d.val)}
-											className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
-												daysWindow === d.val ? 'bg-primary text-primary-foreground shadow-xs' : 'text-muted-foreground hover:text-primary'
-											}`}
-										>
-											<Calendar size={11} /> {d.label}
-										</button>
-									))}
-								</div>
-								{(() => {
+						<div className="flex flex-wrap items-center gap-2 shrink-0">
+							{/* Modern Interactive Calendar Date Range Dropdown */}
+							<div className="relative shrink-0 z-30" ref={dateDropdownRef}>
+								<button
+									type="button"
+									onClick={() => setIsDateDropdownOpen((prev) => !prev)}
+									className="px-3.5 py-2 bg-slate-100/90 hover:bg-slate-200/80 text-primary font-bold text-xs border border-outline-variant/40 rounded-xl transition-all cursor-pointer flex items-center gap-2.5 shadow-xs group"
+									title="Filter by date range"
+								>
+									<div className="w-6 h-6 rounded-lg bg-accent/15 text-accent flex items-center justify-center group-hover:scale-105 transition-transform shrink-0">
+										<Calendar size={13} />
+									</div>
+									<div className="flex flex-col text-left">
+										<span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider leading-none">
+											{DATE_PRESETS.find((p) => p.id === datePreset)?.label || 'Date Range'}
+										</span>
+										<span className="text-xs font-extrabold text-primary leading-tight mt-0.5">
+											{formatDDMMYYYY(startDate)} to {formatDDMMYYYY(endDate)}
+										</span>
+									</div>
+									<ChevronDown
+										size={14}
+										className={`transition-transform duration-200 text-muted-foreground ml-1 shrink-0 ${
+											isDateDropdownOpen ? 'rotate-180 text-accent' : ''
+										}`}
+									/>
+								</button>
+
+								{isDateDropdownOpen && (
+									<div className="absolute right-0 top-full mt-2 w-84 bg-background/95 backdrop-blur-2xl border border-border/90 rounded-3xl p-4 shadow-2xl z-[99999] space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
+										{/* Quick Preset Chips */}
+										<div className="flex flex-wrap gap-1 border-b border-border/60 pb-3">
+											{DATE_PRESETS.filter((p) => p.id !== 'custom').map((p) => (
+												<button
+													key={p.id}
+													type="button"
+													onClick={() => handlePresetClick(p.id)}
+													className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+														datePreset === p.id
+															? 'bg-primary text-primary-foreground shadow-xs'
+															: 'bg-slate-100 hover:bg-slate-200 text-muted-foreground hover:text-primary'
+													}`}
+												>
+													{p.label}
+												</button>
+											))}
+										</div>
+
+										{/* Month & Year Navigation Header */}
+										<div className="flex items-center justify-between">
+											<div className="flex items-center gap-1.5">
+												<button
+													type="button"
+													onClick={() => {
+														if (calMonth === 0) {
+															setCalMonth(11);
+															setCalYear((y) => y - 1);
+														} else {
+															setCalMonth((m) => m - 1);
+														}
+													}}
+													className="p-1.5 rounded-xl hover:bg-slate-100 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+												>
+													<ChevronLeft size={16} />
+												</button>
+												<span className="text-xs font-black text-primary uppercase tracking-wider px-1">
+													{MONTH_NAMES[calMonth]} {calYear}
+												</span>
+												<button
+													type="button"
+													onClick={() => {
+														if (calMonth === 11) {
+															setCalMonth(0);
+															setCalYear((y) => y + 1);
+														} else {
+															setCalMonth((m) => m + 1);
+														}
+													}}
+													className="p-1.5 rounded-xl hover:bg-slate-100 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+												>
+													<ChevronRight size={16} />
+												</button>
+											</div>
+											<button
+												type="button"
+												onClick={() => setIsDateDropdownOpen(false)}
+												className="text-muted-foreground hover:text-primary transition-colors p-1 rounded-xl hover:bg-slate-100 cursor-pointer"
+											>
+												<X size={14} />
+											</button>
+										</div>
+
+										{/* Weekday Labels */}
+										<div className="grid grid-cols-7 gap-1 text-center font-bold text-[10px] text-muted-foreground uppercase tracking-wider">
+											{['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
+												<span key={d} className="py-1">{d}</span>
+											))}
+										</div>
+
+										{/* Days Matrix */}
+										<div className="grid grid-cols-7 gap-1 text-xs font-semibold">
+											{(() => {
+												const firstDayOfWeek = new Date(calYear, calMonth, 1).getDay();
+												const totalDaysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+												const blanks = Array.from({ length: firstDayOfWeek });
+												const days = Array.from({ length: totalDaysInMonth }, (_, i) => i + 1);
+												const todayLocal = toLocalDateStr();
+
+												return (
+													<>
+														{blanks.map((_, i) => (
+															<span key={`b-${i}`} className="h-8" />
+														))}
+														{days.map((day) => {
+															const dayStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+															const isStart = dayStr === startDate;
+															const isEnd = dayStr === endDate;
+															const inRange = dayStr > startDate && dayStr < endDate;
+															const isToday = dayStr === todayLocal;
+
+															return (
+																<button
+																	key={dayStr}
+																	type="button"
+																	onClick={() => handleDayClick(dayStr)}
+																	className={`h-8 rounded-xl flex items-center justify-center font-semibold text-xs transition-all cursor-pointer relative ${
+																		isStart || isEnd
+																			? 'bg-primary text-primary-foreground font-black shadow-xs z-10'
+																			: inRange
+																			? 'bg-primary/10 text-primary font-bold rounded-none'
+																			: isToday
+																			? 'border border-accent text-accent font-bold hover:bg-accent/10'
+																			: 'text-primary hover:bg-slate-100'
+																	}`}
+																>
+																	{day}
+																</button>
+															);
+														})}
+													</>
+												);
+											})()}
+										</div>
+
+										{/* Footer with summary and Apply button */}
+										<div className="pt-3 border-t border-border/60 flex items-center justify-between gap-3">
+											<div className="text-[11px] text-muted-foreground">
+												<span className="font-bold text-primary">{formatDDMMYYYY(startDate)}</span> to{' '}
+												<span className="font-bold text-primary">{formatDDMMYYYY(endDate)}</span>
+											</div>
+											<button
+												type="button"
+												onClick={() => setIsDateDropdownOpen(false)}
+												className="px-4 py-1.5 bg-primary text-primary-foreground text-xs font-bold rounded-xl hover:bg-primary/90 transition-all cursor-pointer shadow-xs"
+											>
+												Apply
+											</button>
+										</div>
+									</div>
+								)}
+							</div>
+
+							{activeCard === 'user-logs' ? (
+								(() => {
 									const selectedOption = EVENT_FILTER_OPTIONS.find((o) => o.id === eventFilter) || EVENT_FILTER_OPTIONS[0];
 									const SelectedIcon = selectedOption.icon;
 									return (
@@ -613,24 +889,48 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 											)}
 										</div>
 									);
-								})()}
-							</div>
-						) : (
-							<div className="flex items-center gap-1 bg-slate-100/90 border border-outline-variant/40 rounded-xl p-1 shrink-0">
-								{['ALL', 'Online', 'Sleep', 'Offline'].map((st) => (
-									<button
-										key={st}
-										type="button"
-										onClick={() => setDeviceStatusFilter(st)}
-										className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-											deviceStatusFilter === st ? 'bg-primary text-primary-foreground shadow-xs' : 'text-muted-foreground hover:text-primary'
-										}`}
-									>
-										{st === 'ALL' ? 'All Statuses' : st}
-									</button>
-								))}
-							</div>
-						)}
+								})()
+							) : (
+								<>
+									<div className="flex items-center gap-1 bg-slate-100/90 border border-outline-variant/40 rounded-xl p-1 shrink-0">
+										<button
+											type="button"
+											onClick={() => setDeviceDateFilterMode('all')}
+											className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+												deviceDateFilterMode === 'all' ? 'bg-primary text-primary-foreground shadow-xs' : 'text-muted-foreground hover:text-primary'
+											}`}
+										>
+											All Fleet
+										</button>
+										<button
+											type="button"
+											onClick={() => setDeviceDateFilterMode('range')}
+											className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+												deviceDateFilterMode === 'range' ? 'bg-primary text-primary-foreground shadow-xs' : 'text-muted-foreground hover:text-primary'
+											}`}
+											title="Only devices registered within selected date range"
+										>
+											Registered in Range
+										</button>
+									</div>
+
+									<div className="flex items-center gap-1 bg-slate-100/90 border border-outline-variant/40 rounded-xl p-1 shrink-0">
+										{['ALL', 'Online', 'Sleep', 'Offline'].map((st) => (
+											<button
+												key={st}
+												type="button"
+												onClick={() => setDeviceStatusFilter(st)}
+												className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+													deviceStatusFilter === st ? 'bg-primary text-primary-foreground shadow-xs' : 'text-muted-foreground hover:text-primary'
+												}`}
+											>
+												{st === 'ALL' ? 'All Statuses' : st}
+											</button>
+										))}
+									</div>
+								</>
+							)}
+						</div>
 					</div>
 				</div>
 
