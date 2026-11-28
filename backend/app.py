@@ -1051,7 +1051,7 @@ def _record_device_location_history(cur, device_id):
                    CASE WHEN "GpsLatitude" IS NOT NULL THEN 'GPS'
                         WHEN "Latitude" IS NOT NULL THEN 'IP'
                         ELSE NULL END AS source,
-                   "IPAddress" AS ip_address
+                   COALESCE("PublicIPAddress", "IPAddress") AS ip_address
             FROM devices WHERE "DeviceId" = %s LIMIT 1;
         """, (device_id,))
         row = cur.fetchone()
