@@ -182,7 +182,32 @@ function buildLocationSummary(deviceId, fallbackLocation, startDate, endDate, lo
 	};
 }
 
-function exportStyledSheet(sheetName, fileName, headers, rows, centerCols = [0], summaryBlock = null) {
+function makeUniqueSheetName(userName, model, usedNames) {
+	const clean = (s) => String(s || '').replace(/[\\/?*[\]:]/g, ' ').replace(/\s+/g, ' ').trim();
+	const u = clean(userName) || 'User';
+	const m = clean(model);
+	let base = m && m !== '—' ? `${u} - ${m}` : u;
+	if (base.length > 31) {
+		if (m && m !== '—') {
+			const maxU = Math.min(u.length, 15);
+			const rem = 31 - maxU - 3;
+			base = rem > 3 ? `${u.slice(0, maxU).trim()} - ${m.slice(0, rem).trim()}` : base.slice(0, 31).trim();
+		} else {
+			base = base.slice(0, 31).trim();
+		}
+	}
+	let candidate = base || 'Sheet';
+	let counter = 2;
+	while (usedNames.has(candidate.toLowerCase())) {
+		const suffix = ` (${counter})`;
+		candidate = `${base.slice(0, 31 - suffix.length).trim()}${suffix}`;
+		counter++;
+	}
+	usedNames.add(candidate.toLowerCase());
+	return candidate;
+}
+
+function buildStyledWorksheet(headers, rows, centerCols = [0], summaryBlock = null) {
 	const colCount = headers.length;
 	const preRows = [];
 	const merges = [];
@@ -371,8 +396,15 @@ function exportStyledSheet(sheetName, fileName, headers, rows, centerCols = [0],
 		}
 	}
 
+	return ws;
+}
+
+function exportStyledWorkbook(fileName, sheets) {
 	const wb = XLSX.utils.book_new();
-	XLSX.utils.book_append_sheet(wb, ws, sheetName);
+	for (const s of sheets) {
+		const ws = buildStyledWorksheet(s.headers, s.rows, s.centerCols || [0], s.summaryBlock || null);
+		XLSX.utils.book_append_sheet(wb, ws, s.sheetName);
+	}
 	XLSX.writeFile(wb, fileName);
 }
 
@@ -716,28 +748,59 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 		setExportingKind('user-logs');
 		try {
 			const headers = ['S.No', 'User Name', 'Employee Code', 'Email', 'Device Name', 'OS User', 'Event', 'Details', 'Timestamp'];
-			const rows = filteredUserLogs.map((ev, idx) => {
-				const meta = getEventMeta(ev.type, ev.detail);
-				return [
-					idx + 1,
-					ev.userName || ev.osUsername || '—',
-					ev.empCode || '—',
-					ev.userEmail || '—',
-					ev.deviceName || '—',
-					ev.osUsername || '—',
-					meta.label,
-					meta.desc,
-					formatDate(ev.at),
-				];
-			});
 			const fileStartDate = formatDDMMYYYY(startDate);
 			const fileEndDate = formatDDMMYYYY(endDate);
 			const fileName = `User_Logs_Report_${fileStartDate}_to_${fileEndDate}.xlsx`;
-			exportStyledSheet('User Logs Report', fileName, headers, rows, [0, 2, 6], {
-				title: `USER ACTIVITY & SESSION LOGS REPORT (${fileStartDate} to ${fileEndDate})`,
-				items: summaryItems,
-			});
-			notify(`Exported ${rows.length} user log entries (${fileStartDate} to ${fileEndDate}) to Excel.`);
+			const reportTitle = `USER ACTIVITY & SESSION LOGS REPORT (${fileStartDate} to ${fileEndDate})`;
+
+			// Group logs by user/device so each user gets a separate sheet named "<User Name> - <Model>"
+			const summaryByKey = new Map(summaryItems.map((item) => [item.key, item]));
+			const logsByKey = new Map();
+			for (const ev of filteredUserLogs) {
+				const key = ev.deviceId || ev.userEmail || ev.userName || ev.osUsername || 'unknown';
+				if (!logsByKey.has(key)) logsByKey.set(key, []);
+				logsByKey.get(key).push(ev);
+			}
+
+			const usedNames = new Set();
+			const sheets = [];
+			for (const [key, evList] of logsByKey.entries()) {
+				const item = summaryByKey.get(key);
+				const rows = evList.map((ev, idx) => {
+					const meta = getEventMeta(ev.type, ev.detail);
+					return [
+						idx + 1,
+						ev.userName || ev.osUsername || '—',
+						ev.empCode || '—',
+						ev.userEmail || '—',
+						ev.deviceName || '—',
+						ev.osUsername || '—',
+						meta.label,
+						meta.desc,
+						formatDate(ev.at),
+					];
+				});
+				sheets.push({
+					sheetName: makeUniqueSheetName(item?.userName || evList[0]?.userName || evList[0]?.osUsername, item?.model, usedNames),
+					headers,
+					rows,
+					centerCols: [0, 2, 6],
+					summaryBlock: item ? { title: reportTitle, items: [item] } : null,
+				});
+			}
+
+			if (sheets.length === 0) {
+				sheets.push({
+					sheetName: 'User Logs Report',
+					headers,
+					rows: [],
+					centerCols: [0, 2, 6],
+					summaryBlock: { title: reportTitle, items: [] },
+				});
+			}
+
+			exportStyledWorkbook(fileName, sheets);
+			notify(`Exported ${filteredUserLogs.length} user log entries across ${sheets.length} sheet(s) (${fileStartDate} to ${fileEndDate}) to Excel.`);
 		} catch {
 			notify('Failed to export user logs.');
 		} finally {
@@ -750,10 +813,19 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 		setExportingKind('device-report');
 		try {
 			const headers = ['S.No', 'Device Name', 'Assigned User', 'Employee Code', 'OS Version', 'Location', 'IP Address', 'Registered On', 'Network Usage', 'Condition', 'Status'];
-			const rows = filteredDevices.map((dev, idx) => {
+			const fileStartDate = formatDDMMYYYY(startDate);
+			const fileEndDate = formatDDMMYYYY(endDate);
+			const fileName = `Device_Report_${fileStartDate}_to_${fileEndDate}.xlsx`;
+			const reportTitle = `FLEET DEVICE COMPLIANCE & STATUS REPORT (${fileStartDate} to ${fileEndDate})`;
+
+			const summaryByKey = new Map(summaryItems.map((item) => [item.key, item]));
+			const usedNames = new Set();
+			const sheets = filteredDevices.map((dev) => {
+				const key = dev.deviceId || dev.id;
+				const item = summaryByKey.get(key);
 				const cond = getDeviceSecurityCondition(dev);
-				return [
-					idx + 1,
+				const row = [
+					1,
 					dev.name || '—',
 					dev.userName || dev.user || '—',
 					dev.empCode || '—',
@@ -765,15 +837,27 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 					cond.label,
 					dev.status || 'Offline',
 				];
+				return {
+					sheetName: makeUniqueSheetName(item?.userName || dev.userName || dev.user, item?.model || dev.model, usedNames),
+					headers,
+					rows: [row],
+					centerCols: [0, 3, 9, 10],
+					summaryBlock: item ? { title: reportTitle, items: [item] } : null,
+				};
 			});
-			const fileStartDate = formatDDMMYYYY(startDate);
-			const fileEndDate = formatDDMMYYYY(endDate);
-			const fileName = `Device_Report_${fileStartDate}_to_${fileEndDate}.xlsx`;
-			exportStyledSheet('Device Report', fileName, headers, rows, [0, 3, 9, 10], {
-				title: `FLEET DEVICE COMPLIANCE & STATUS REPORT (${fileStartDate} to ${fileEndDate})`,
-				items: summaryItems,
-			});
-			notify(`Exported ${rows.length} device report rows (${fileStartDate} to ${fileEndDate}) to Excel.`);
+
+			if (sheets.length === 0) {
+				sheets.push({
+					sheetName: 'Device Report',
+					headers,
+					rows: [],
+					centerCols: [0, 3, 9, 10],
+					summaryBlock: { title: reportTitle, items: [] },
+				});
+			}
+
+			exportStyledWorkbook(fileName, sheets);
+			notify(`Exported ${filteredDevices.length} device report rows across ${sheets.length} sheet(s) (${fileStartDate} to ${fileEndDate}) to Excel.`);
 		} catch {
 			notify('Failed to export device report.');
 		} finally {
