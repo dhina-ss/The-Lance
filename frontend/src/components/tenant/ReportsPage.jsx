@@ -231,6 +231,20 @@ function formatTimeDetailLabel(evType, durationMs, rawDetail, hasNext) {
 	return d || cleanDetail || '—';
 }
 
+function countWorkingDaysExcludingSunday(startDate, endDate) {
+	const cur = new Date(`${startDate}T00:00:00`);
+	const end = new Date(`${endDate}T00:00:00`);
+	if (isNaN(cur.getTime()) || isNaN(end.getTime()) || cur > end) return 0;
+	let workingDays = 0;
+	while (cur <= end) {
+		if (cur.getDay() !== 0) {
+			workingDays++;
+		}
+		cur.setDate(cur.getDate() + 1);
+	}
+	return workingDays;
+}
+
 function computeActivityForDevice(evList, startDate, endDate) {
 	const startMs = new Date(`${startDate}T00:00:00`).getTime();
 	const endMs = Math.min(Date.now(), new Date(`${endDate}T23:59:59.999`).getTime());
@@ -263,9 +277,16 @@ function computeActivityForDevice(evList, startDate, endDate) {
 		detailByOrigIdx.set(origIdx, formatTimeDetailLabel(t, durationMs, ev.detail, hasNext));
 	}
 
+	const workingDays = countWorkingDaysExcludingSunday(startDate, endDate);
+	const expectedHours = workingDays * 8;
+	const expectedMs = expectedHours * 3600000;
+	const workingHoursPercent = expectedMs > 0 ? `${((activeMs / expectedMs) * 100).toFixed(1)}%` : '0.0%';
+
 	return {
 		totalActiveHours: formatDurationHm(activeMs),
 		totalInactiveHours: formatDurationHm(inactiveMs),
+		actualWorkingHours: `${expectedHours} hrs (${workingDays} ${workingDays === 1 ? 'day' : 'days'} × 8h)`,
+		workingHoursPercent,
 		detailByOrigIdx,
 	};
 }
@@ -279,7 +300,7 @@ function makeUniqueSheetName(userName, model, usedNames) {
 		if (m && m !== '—') {
 			const maxU = Math.min(u.length, 15);
 			const rem = 31 - maxU - 3;
-			base = rem > 3 ? `${u.slice(0, maxU).trim()} - ${m.slice(0, rem).trim()}` : base.slice(0, 31).trim();
+			base = rem > 3 ? `${u.slice(0, maxU).trim()}` : base.slice(0, 31).trim();
 		} else {
 			base = base.slice(0, 31).trim();
 		}
@@ -353,6 +374,15 @@ function buildStyledWorksheet(headers, rows, centerCols = [0], summaryBlock = nu
 					item.totalActiveHours || '0m',
 					'Total Inactive Hours',
 					item.totalInactiveHours || '0m',
+				]));
+			}
+			if (item.actualWorkingHours != null || item.workingHoursPercent != null) {
+				keyValRowIndices.add(preRows.length);
+				preRows.push(pad([
+					'Actual Working Hours',
+					item.actualWorkingHours || '0 hrs',
+					'Working Hours %',
+					item.workingHoursPercent || '0.0%',
 				]));
 			}
 
@@ -832,6 +862,8 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 					ipAddress: dev?.ip || '—',
 					totalActiveHours: activity.totalActiveHours,
 					totalInactiveHours: activity.totalInactiveHours,
+					actualWorkingHours: activity.actualWorkingHours,
+					workingHoursPercent: activity.workingHoursPercent,
 					locationInfo: buildLocationSummary(ev.deviceId, fallbackLoc, startDate, endDate, locationHistory),
 				});
 			}
@@ -852,6 +884,8 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 					ipAddress: dev.ip || '—',
 					totalActiveHours: activity.totalActiveHours,
 					totalInactiveHours: activity.totalInactiveHours,
+					actualWorkingHours: activity.actualWorkingHours,
+					workingHoursPercent: activity.workingHoursPercent,
 					locationInfo: buildLocationSummary(dev.deviceId, fallbackLoc, startDate, endDate, locationHistory),
 				};
 			});
