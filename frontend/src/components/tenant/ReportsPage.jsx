@@ -185,6 +185,22 @@ function buildLocationSummary(deviceId, fallbackLocation, startDate, endDate, lo
 const ACTIVE_EVENT_TYPES = new Set(['login', 'device_on', 'startup', 'power_on', 'wake', 'resume', 'unlock']);
 const INACTIVE_EVENT_TYPES = new Set(['sleep', 'suspend', 'lock', 'shutdown', 'logoff', 'logout']);
 
+function formatTimestampDDMMYYYY(dateInput) {
+	if (!dateInput) return '—';
+	const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
+	if (isNaN(d.getTime())) return String(dateInput);
+	const day = String(d.getDate()).padStart(2, '0');
+	const month = String(d.getMonth() + 1).padStart(2, '0');
+	const year = d.getFullYear();
+	let hours = d.getHours();
+	const ampm = hours >= 12 ? 'PM' : 'AM';
+	hours = hours % 12 || 12;
+	const hh = String(hours).padStart(2, '0');
+	const mm = String(d.getMinutes()).padStart(2, '0');
+	const ss = String(d.getSeconds()).padStart(2, '0');
+	return `${day}-${month}-${year} ${hh}:${mm}:${ss} ${ampm}`;
+}
+
 function formatDurationHm(ms) {
 	const totalMins = Math.max(0, Math.round(ms / 60000));
 	const hrs = Math.floor(totalMins / 60);
@@ -297,7 +313,7 @@ function computeActivityForDevice(evList, startDate, endDate) {
 	const { expectedMs, workingDays } = computeExpectedWorkingMs(startDate, endDate, firstLogMs, endMs);
 	const workingHoursPercent = expectedMs > 0 ? `${((activeMs / expectedMs) * 100).toFixed(1)}%` : '0.0%';
 	const actualWorkingLabel = firstLogMs != null
-		? `${formatDurationHm(expectedMs)} (from ${formatDate(new Date(firstLogMs).toISOString())})`
+		? `${formatDurationHm(expectedMs)} (from ${formatTimestampDDMMYYYY(new Date(firstLogMs))})`
 		: `${formatDurationHm(expectedMs)} (${workingDays} ${workingDays === 1 ? 'day' : 'days'} × 8h)`;
 
 	return {
@@ -930,7 +946,7 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 						idx + 1,
 						meta.label,
 						activity.detailByOrigIdx.get(idx) || '—',
-						formatDate(ev.at),
+						formatTimestampDDMMYYYY(ev.at),
 					];
 				});
 				sheets.push({
