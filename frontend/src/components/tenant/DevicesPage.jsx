@@ -1287,10 +1287,8 @@ export default function DevicesPage({ initialDeviceId, onClearInitialDevice, act
 													<div className="col-span-2 flex items-center gap-4">
 														<div>
 															<span className="text-[11px] text-on-surface-variant block uppercase font-medium mb-0.5">External Maps</span>
-															<div className="flex items-center gap-3">
+															<div className="flex items-center">
 																<a href={`https://www.google.com/maps?q=${inspectDevice.latitude},${inspectDevice.longitude}`} target="_blank" rel="noreferrer" className="text-primary font-semibold text-[13px] hover:underline">Google Maps</a>
-																<span className="text-outline-variant">·</span>
-																<a href={`https://www.openstreetmap.org/?mlat=${inspectDevice.latitude}&mlon=${inspectDevice.longitude}#map=14/${inspectDevice.latitude}/${inspectDevice.longitude}`} target="_blank" rel="noreferrer" className="text-primary font-semibold text-[13px] hover:underline">OpenStreetMap</a>
 															</div>
 														</div>
 													</div>
