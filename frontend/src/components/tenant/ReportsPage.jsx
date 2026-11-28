@@ -183,7 +183,7 @@ function buildLocationSummary(deviceId, fallbackLocation, startDate, endDate, lo
 }
 
 const ACTIVE_EVENT_TYPES = new Set(['login', 'device_on', 'startup', 'power_on', 'wake', 'resume', 'unlock']);
-const INACTIVE_EVENT_TYPES = new Set(['sleep', 'suspend', 'lock', 'shutdown', 'logoff', 'logout']);
+const INACTIVE_EVENT_TYPES = new Set(['sleep', 'suspend', 'lock', 'shutdown', 'logoff', 'logout', 'alert']);
 
 function formatTimestampDDMMYYYY(dateInput) {
 	if (!dateInput) return '—';
@@ -240,6 +240,10 @@ function formatTimeDetailLabel(evType, durationMs, rawDetail, hasNext) {
 		if (d) return `${d} logged off`;
 		return cleanDetail || 'Signed off';
 	}
+	if (t === 'alert') {
+		if (d) return `${d} inactive`;
+		return cleanDetail || 'Inactive';
+	}
 	if (ACTIVE_EVENT_TYPES.has(t)) {
 		if (d) return hasNext ? `${d} active` : `${d} active (ongoing)`;
 		return cleanDetail || 'Active';
@@ -285,8 +289,8 @@ function computeActivityForDevice(evList, startDate, endDate) {
 		.sort((a, b) => (Number.isNaN(a.ts) ? 0 : a.ts) - (Number.isNaN(b.ts) ? 0 : b.ts));
 
 	let activeMs = 0;
-	let inactiveMs = 0;
 	const detailByOrigIdx = new Map();
+	const eventsByDay = new Map();
 
 	for (let i = 0; i < asc.length; i++) {
 		const { ev, origIdx, ts } = asc[i];
@@ -301,11 +305,34 @@ function computeActivityForDevice(evList, startDate, endDate) {
 			if (clampedEnd >= clampedStart) {
 				durationMs = clampedEnd - clampedStart;
 				if (ACTIVE_EVENT_TYPES.has(t)) activeMs += durationMs;
-				else if (INACTIVE_EVENT_TYPES.has(t)) inactiveMs += durationMs;
+			}
+			if (ts >= startMs && ts <= endMs) {
+				const dayKey = toLocalDateStr(new Date(ts));
+				if (!eventsByDay.has(dayKey)) eventsByDay.set(dayKey, []);
+				eventsByDay.get(dayKey).push(asc[i]);
 			}
 		}
 
 		detailByOrigIdx.set(origIdx, formatTimeDetailLabel(t, durationMs, ev.detail, hasNext));
+	}
+
+	// Calculate total inactive hours per day strictly between when the device came on that day
+	// and the last event of that day (so post-shutdown / overnight gaps are not counted).
+	let inactiveMs = 0;
+	for (const dayEvents of eventsByDay.values()) {
+		const firstOnIdx = dayEvents.findIndex((item) =>
+			ACTIVE_EVENT_TYPES.has((item.ev.type || '').toLowerCase())
+		);
+		if (firstOnIdx === -1) continue;
+		const lastIdx = dayEvents.length - 1;
+		for (let j = firstOnIdx; j < lastIdx; j++) {
+			const cur = dayEvents[j];
+			const next = dayEvents[j + 1];
+			const curType = (cur.ev.type || '').toLowerCase();
+			if (INACTIVE_EVENT_TYPES.has(curType)) {
+				inactiveMs += Math.max(0, next.ts - cur.ts);
+			}
+		}
 	}
 
 	const firstLogEntry = asc.find((x) => !Number.isNaN(x.ts));
