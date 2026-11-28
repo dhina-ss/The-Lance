@@ -76,6 +76,7 @@ export function mapDevice(d) {
     name: d.deviceName,
     manufacturer: d.manufacturer,
     model: d.model || d.deviceName,
+    hasBattery: d.hasBattery,
     serialNumber: d.serialNumber,
     processor: d.processor,
     ram: d.ramSize,
@@ -465,6 +466,21 @@ export async function fetchAllUserLogs(days = 30, limit = 1000, startDate = null
       }),
     );
     return perUser.flat().sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0));
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchLocationHistory(startDate = null, endDate = null) {
+  try {
+    const params = new URLSearchParams();
+    if (startDate && endDate) {
+      params.set('start_date', startDate);
+      params.set('end_date', endDate);
+    }
+    const qs = params.toString();
+    const data = await getJson(`/api/reports/location-history${qs ? `?${qs}` : ''}`);
+    return Array.isArray(data) ? data : [];
   } catch {
     return [];
   }

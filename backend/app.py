@@ -1023,6 +1023,61 @@ _SERVER_STARTED_AT = _dt.datetime.now(_dt.timezone.utc)
 LOCATION_REFRESH_SECONDS = 3600  # Re-check location once every 1 hour
 
 
+def _ensure_location_history_table(cur):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS device_location_history (
+            id SERIAL PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            recorded_date DATE NOT NULL DEFAULT CURRENT_DATE,
+            city TEXT,
+            region TEXT,
+            country TEXT,
+            location_label TEXT,
+            source TEXT,
+            ip_address TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (device_id, recorded_date)
+        );
+    """)
+
+
+def _record_device_location_history(cur, device_id):
+    try:
+        _ensure_location_history_table(cur)
+        cur.execute("""
+            SELECT COALESCE("GpsCity", "LocationCity") AS city,
+                   "LocationRegion" AS region,
+                   COALESCE("GpsCountry", "LocationCountry") AS country,
+                   CASE WHEN "GpsLatitude" IS NOT NULL THEN 'GPS'
+                        WHEN "Latitude" IS NOT NULL THEN 'IP'
+                        ELSE NULL END AS source,
+                   "IPAddress" AS ip_address
+            FROM devices WHERE "DeviceId" = %s LIMIT 1;
+        """, (device_id,))
+        row = cur.fetchone()
+        if not row:
+            return
+        city, region, country, source, ip_addr = row
+        parts = [p for p in (city, region, country) if p]
+        label = ', '.join(parts) if parts else None
+        if not label:
+            return
+        cur.execute("""
+            INSERT INTO device_location_history (device_id, recorded_date, city, region, country, location_label, source, ip_address, updated_at)
+            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (device_id, recorded_date) DO UPDATE SET
+                city = EXCLUDED.city,
+                region = EXCLUDED.region,
+                country = EXCLUDED.country,
+                location_label = EXCLUDED.location_label,
+                source = EXCLUDED.source,
+                ip_address = EXCLUDED.ip_address,
+                updated_at = CURRENT_TIMESTAMP;
+        """, (device_id, city, region, country, label, source, ip_addr))
+    except Exception:
+        pass
+
+
 # Heartbeat gap thresholds:
 #   > 1 min (60s) without heartbeat -> considered Sleep
 #   > 5 min (300s) without heartbeat (and not OS-suspended) -> considered Shutdown / Offline
@@ -1551,6 +1606,8 @@ def device_heartbeat():
                     '"LocationRegion"=COALESCE(%s,"LocationRegion") WHERE "DeviceId"=%s;',
                     (rcity, rcountry, rregion, device_id))
 
+        _record_device_location_history(cur, device_id)
+
         # Auto-expire timed USB blocking.
         cur.execute('UPDATE devices SET "UsbBlockingEnabled"=false, "UsbBlockingUntil"=NULL '
                     'WHERE "DeviceId"=%s AND "UsbBlockingEnabled"=true AND "UsbBlockingUntil" IS NOT NULL '
@@ -1864,6 +1921,7 @@ def report_location():
                     '"GpsCity"=%s, "GpsCountry"=%s, '
                     '"LocationRegion"=COALESCE(%s,"LocationRegion") WHERE "DeviceId"=%s;',
                     (lat, lon, data.get('accuracyMeters'), city, country, region, device_id))
+        _record_device_location_history(cur, device_id)
         conn.commit()
         cur.close()
         conn.close()
@@ -1908,6 +1966,7 @@ def refresh_device_location(device_id):
                     '"LocationRegion"=COALESCE(%s,"LocationRegion") WHERE "DeviceId"=%s;',
                     (rcity, rcountry, rregion, dev_id))
 
+        _record_device_location_history(cur, dev_id)
         conn.commit()
         cur.execute('SELECT "LocationCity","LocationRegion","LocationCountry","Latitude","Longitude",'
                     '"LocationUpdatedAt","GpsCity","GpsCountry","GpsLatitude","GpsLongitude",'
@@ -2230,9 +2289,11 @@ def get_devices():
             SELECT d.*,
                    u."Username" AS "ActivatedByName",
                    u."Email" AS "ActivatedByEmail",
-                   u."EmployeeCode" AS "ActivatedByEmployeeCode"
+                   u."EmployeeCode" AS "ActivatedByEmployeeCode",
+                   m.has_battery AS "HasBattery"
             FROM devices d
             LEFT JOIN app_users u ON u."Id"::text = d."ActivatedByUserId"
+            LEFT JOIN device_metrics m ON m.device_id = d."DeviceId"
             ORDER BY d."Id" ASC;
         """)
         rows = cur.fetchall()
@@ -2248,6 +2309,7 @@ def get_devices():
                 'serialNumber': r.get('SerialNumber'),
                 'manufacturer': r.get('Manufacturer'),
                 'model': r.get('Model'),
+                'hasBattery': r.get('HasBattery'),
                 'processor': r.get('Processor'),
                 'ramSize': r.get('RamSize'),
                 'storageSize': r.get('StorageSize'),
@@ -2783,6 +2845,50 @@ def get_all_user_logs_report():
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/reports/location-history', methods=['GET'])
+def get_location_history_report():
+    """Date-wise location history per device across a date range."""
+    try:
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        conn = get_db_connection()
+        cur = conn.cursor()
+        _ensure_location_history_table(cur)
+        conn.commit()
+        if start_date and end_date:
+            cur.execute("""
+                SELECT device_id, recorded_date::text, city, region, country, location_label, source, ip_address
+                FROM device_location_history
+                WHERE recorded_date >= %s::date AND recorded_date <= %s::date
+                ORDER BY recorded_date ASC, device_id ASC;
+            """, (start_date, end_date))
+        else:
+            cur.execute("""
+                SELECT device_id, recorded_date::text, city, region, country, location_label, source, ip_address
+                FROM device_location_history
+                WHERE recorded_date >= CURRENT_DATE - INTERVAL '30 days'
+                ORDER BY recorded_date ASC, device_id ASC;
+            """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify([
+            {
+                'deviceId': r[0],
+                'date': r[1],
+                'city': r[2],
+                'region': r[3],
+                'country': r[4],
+                'locationLabel': r[5],
+                'source': r[6],
+                'ipAddress': r[7],
+            }
+            for r in rows
+        ]), 200
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 

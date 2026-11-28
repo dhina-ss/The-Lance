@@ -30,8 +30,10 @@ import {
 	Check,
 	Calendar,
 	X,
+	Laptop,
+	MapPin,
 } from 'lucide-react';
-import { fetchAllUserLogs, fetchDevices, fetchUsers, formatDate, relativeTime } from '../../api/ems';
+import { fetchAllUserLogs, fetchDevices, fetchUsers, fetchLocationHistory, formatDate, relativeTime } from '../../api/ems';
 
 function getEventMeta(type, detail) {
 	const t = (type || '').toLowerCase();
@@ -134,14 +136,183 @@ function getDeviceSecurityCondition(dev) {
 		: { label: 'Attention', ok: false, cls: 'bg-amber-500/10 text-amber-600 border-amber-500/20' };
 }
 
-function exportStyledSheet(sheetName, fileName, headers, rows, centerCols = [0]) {
-	const sheetData = [headers, ...rows];
+function getDeviceTypeLabel(dev) {
+	if (!dev) return '—';
+	if (dev.hasBattery === true) return 'Laptop';
+	if (dev.hasBattery === false) return 'Desktop';
+	const model = String(dev.model || dev.name || '').toLowerCase();
+	if (/laptop|notebook|book|latitude|thinkpad|pavilion|inspiron|elitebook|zenbook|vivobook|ideapad|macbook|surface|probook|envy|spectre|xps|vostro|gram|swift|nitro|rog|legion|omen/.test(model)) {
+		return 'Laptop';
+	}
+	if (/desktop|optiplex|tower|workstation|imac|mac mini|prodesk|thinkcentre|elitedesk/.test(model)) {
+		return 'Desktop';
+	}
+	return 'Desktop';
+}
+
+function buildLocationSummary(deviceId, fallbackLocation, startDate, endDate, locationHistory) {
+	const isMultiDay = startDate !== endDate;
+	const entries = (locationHistory || [])
+		.filter((h) => h.deviceId === deviceId && h.date >= startDate && h.date <= endDate && h.locationLabel)
+		.sort((a, b) => a.date.localeCompare(b.date));
+
+	if (!isMultiDay) {
+		return {
+			isMultiDay: false,
+			varied: false,
+			text: entries[0]?.locationLabel || fallbackLocation || '—',
+			entries,
+		};
+	}
+
+	const uniqueLocs = Array.from(new Set(entries.map((e) => e.locationLabel)));
+	if (uniqueLocs.length > 1) {
+		return {
+			isMultiDay: true,
+			varied: true,
+			text: entries.map((e) => `${formatDDMMYYYY(e.date)}: ${e.locationLabel}`).join('\n'),
+			entries,
+		};
+	}
+
+	const singleLoc = uniqueLocs[0] || fallbackLocation || '—';
+	return {
+		isMultiDay: true,
+		varied: false,
+		text: singleLoc,
+		entries,
+	};
+}
+
+function exportStyledSheet(sheetName, fileName, headers, rows, centerCols = [0], summaryBlock = null) {
+	const colCount = headers.length;
+	const preRows = [];
+	const merges = [];
+	const titleRowIndices = new Set();
+	const sectionRowIndices = new Set();
+	const keyValRowIndices = new Set();
+	const miniHeaderRowIndices = new Set();
+	const miniDataRowIndices = new Set();
+
+	if (summaryBlock) {
+		// Row 0: Report Title Banner
+		const titleRow = new Array(colCount).fill('');
+		titleRow[0] = summaryBlock.title;
+		titleRowIndices.add(preRows.length);
+		merges.push({ s: { r: preRows.length, c: 0 }, e: { r: preRows.length, c: colCount - 1 } });
+		preRows.push(titleRow);
+
+		// Blank separator
+		preRows.push(new Array(colCount).fill(''));
+
+		// Summary Details Section Header
+		const secRow = new Array(colCount).fill('');
+		secRow[0] = 'SUMMARY DETAILS';
+		sectionRowIndices.add(preRows.length);
+		merges.push({ s: { r: preRows.length, c: 0 }, e: { r: preRows.length, c: colCount - 1 } });
+		preRows.push(secRow);
+
+		const items = summaryBlock.items || [];
+		if (items.length === 1) {
+			const item = items[0];
+			const pad = (arr) => {
+				const r = new Array(colCount).fill('');
+				arr.forEach((v, i) => { if (i < colCount) r[i] = v; });
+				return r;
+			};
+			keyValRowIndices.add(preRows.length);
+			preRows.push(pad(['User Name', item.userName, 'Employee Code', item.empCode]));
+			keyValRowIndices.add(preRows.length);
+			preRows.push(pad(['Mail Address', item.mailAddress, 'Device Name', item.deviceName]));
+			keyValRowIndices.add(preRows.length);
+			preRows.push(pad(['Device Type', item.deviceType, 'Model', item.model]));
+			keyValRowIndices.add(preRows.length);
+			preRows.push(pad([
+				'IP Address',
+				item.ipAddress,
+				'Location',
+				item.locationInfo.varied
+					? 'Varied across selected dates (Date-wise below)'
+					: item.locationInfo.text,
+			]));
+
+			if (item.locationInfo.varied && item.locationInfo.entries.length > 0) {
+				const locSec = new Array(colCount).fill('');
+				locSec[0] = 'Date-wise Location Breakdown';
+				sectionRowIndices.add(preRows.length);
+				merges.push({ s: { r: preRows.length, c: 0 }, e: { r: preRows.length, c: colCount - 1 } });
+				preRows.push(locSec);
+
+				for (const entry of item.locationInfo.entries) {
+					keyValRowIndices.add(preRows.length);
+					preRows.push(pad(['Date', formatDDMMYYYY(entry.date), 'Location', entry.locationLabel]));
+				}
+			}
+		} else if (items.length > 1) {
+			const miniHeaders = ['User Name', 'Emp Code', 'Mail Address', 'Device Type', 'Model', 'IP Address', 'Location'];
+			const padMini = (arr) => {
+				const r = new Array(colCount).fill('');
+				arr.forEach((v, i) => { if (i < colCount) r[i] = v; });
+				return r;
+			};
+			miniHeaderRowIndices.add(preRows.length);
+			preRows.push(padMini(miniHeaders));
+			for (const item of items) {
+				miniDataRowIndices.add(preRows.length);
+				preRows.push(padMini([
+					item.userName,
+					item.empCode,
+					item.mailAddress,
+					item.deviceType,
+					item.model,
+					item.ipAddress,
+					item.locationInfo.varied ? item.locationInfo.text : item.locationInfo.text,
+				]));
+			}
+		}
+
+		// Blank separator before main table column headers
+		preRows.push(new Array(colCount).fill(''));
+	}
+
+	const tableHeaderRowIdx = preRows.length;
+	const sheetData = [...preRows, headers, ...rows];
 	const ws = XLSX.utils.aoa_to_sheet(sheetData);
+	if (merges.length > 0) ws['!merges'] = merges;
+
 	const thinBorder = {
 		top: { style: 'thin', color: { rgb: 'D0D5DD' } },
 		bottom: { style: 'thin', color: { rgb: 'D0D5DD' } },
 		left: { style: 'thin', color: { rgb: 'D0D5DD' } },
 		right: { style: 'thin', color: { rgb: 'D0D5DD' } },
+	};
+	const titleStyle = {
+		fill: { fgColor: { rgb: '16365C' } },
+		font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 12, name: 'Calibri' },
+		alignment: { horizontal: 'left', vertical: 'center' },
+	};
+	const sectionStyle = {
+		fill: { fgColor: { rgb: 'E2E8F0' } },
+		font: { bold: true, color: { rgb: '16365C' }, sz: 10, name: 'Calibri' },
+		alignment: { horizontal: 'left', vertical: 'center' },
+		border: thinBorder,
+	};
+	const keyStyle = {
+		fill: { fgColor: { rgb: 'F8FAFC' } },
+		font: { bold: true, color: { rgb: '334155' }, sz: 10, name: 'Calibri' },
+		alignment: { horizontal: 'left', vertical: 'center' },
+		border: thinBorder,
+	};
+	const valStyle = {
+		font: { sz: 10, name: 'Calibri', color: { rgb: '0F172A' } },
+		alignment: { horizontal: 'left', vertical: 'center', wrapText: true },
+		border: thinBorder,
+	};
+	const miniHeaderStyle = {
+		fill: { fgColor: { rgb: '334155' } },
+		font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10, name: 'Calibri' },
+		alignment: { horizontal: 'left', vertical: 'center' },
+		border: thinBorder,
 	};
 	const headerStyle = {
 		fill: { fgColor: { rgb: '16365C' } },
@@ -151,29 +322,54 @@ function exportStyledSheet(sheetName, fileName, headers, rows, centerCols = [0])
 	};
 	const dataStyle = {
 		font: { sz: 10, name: 'Calibri', color: { rgb: '1D2939' } },
-		alignment: { vertical: 'center' },
+		alignment: { vertical: 'center', wrapText: true },
 		border: thinBorder,
 	};
 
 	const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
 	ws['!cols'] = headers.map((h, colIdx) => {
 		let maxLen = h.length;
-		for (let r = 1; r <= rows.length; r++) {
+		for (let r = tableHeaderRowIdx; r < sheetData.length; r++) {
 			const val = String(sheetData[r]?.[colIdx] ?? '');
-			if (val.length > maxLen) maxLen = val.length;
+			const longestLine = Math.max(...val.split('\n').map((l) => l.length));
+			if (longestLine > maxLen) maxLen = longestLine;
 		}
-		return { wch: Math.min(Math.max(maxLen + 4, 12), 42) };
+		for (let r = 0; r < tableHeaderRowIdx; r++) {
+			if (titleRowIndices.has(r) || sectionRowIndices.has(r)) continue;
+			const val = String(sheetData[r]?.[colIdx] ?? '');
+			const longestLine = Math.max(...val.split('\n').map((l) => l.length));
+			if (longestLine > maxLen) maxLen = longestLine;
+		}
+		return { wch: Math.min(Math.max(maxLen + 4, 14), 46) };
 	});
-	ws['!rows'] = [{ hpt: 22, hpx: 22 }, ...rows.map(() => ({ hpt: 19, hpx: 19 }))];
+
+	ws['!rows'] = sheetData.map((rowArr, r) => {
+		if (titleRowIndices.has(r)) return { hpt: 26, hpx: 26 };
+		if (r === tableHeaderRowIdx) return { hpt: 23, hpx: 23 };
+		const maxLines = Math.max(1, ...rowArr.map((v) => String(v ?? '').split('\n').length));
+		if (maxLines > 1) return { hpt: maxLines * 15 + 4, hpx: maxLines * 15 + 4 };
+		return { hpt: 19, hpx: 19 };
+	});
 
 	for (let R = range.s.r; R <= range.e.r; R++) {
 		for (let C = range.s.c; C <= range.e.c; C++) {
 			const addr = XLSX.utils.encode_cell({ r: R, c: C });
 			if (!ws[addr]) continue;
-			ws[addr].s =
-				R === 0
-					? headerStyle
-					: { ...dataStyle, alignment: { ...dataStyle.alignment, horizontal: centerCols.includes(C) ? 'center' : 'left' } };
+			if (titleRowIndices.has(R)) {
+				ws[addr].s = titleStyle;
+			} else if (sectionRowIndices.has(R)) {
+				ws[addr].s = sectionStyle;
+			} else if (keyValRowIndices.has(R)) {
+				ws[addr].s = C % 2 === 0 ? keyStyle : valStyle;
+			} else if (miniHeaderRowIndices.has(R)) {
+				ws[addr].s = miniHeaderStyle;
+			} else if (miniDataRowIndices.has(R)) {
+				ws[addr].s = valStyle;
+			} else if (R === tableHeaderRowIdx) {
+				ws[addr].s = headerStyle;
+			} else if (R > tableHeaderRowIdx) {
+				ws[addr].s = { ...dataStyle, alignment: { ...dataStyle.alignment, horizontal: centerCols.includes(C) ? 'center' : 'left' } };
+			}
 		}
 	}
 
@@ -269,6 +465,7 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 	const [devices, setDevices] = useState([]);
 	const [users, setUsers] = useState([]);
 	const [userLogs, setUserLogs] = useState([]);
+	const [locationHistory, setLocationHistory] = useState([]);
 	const [loading, setLoading] = useState(true);
 	const [refreshing, setRefreshing] = useState(false);
 	const [error, setError] = useState(null);
@@ -344,14 +541,16 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 		else setRefreshing(true);
 		try {
 			const diffDays = Math.max(1, Math.ceil((new Date(`${end}T23:59:59`).getTime() - new Date(`${start}T00:00:00`).getTime()) / (1000 * 86400)));
-			const [devs, usrs, logs] = await Promise.all([
+			const [devs, usrs, logs, locHist] = await Promise.all([
 				fetchDevices().catch(() => []),
 				fetchUsers().catch(() => []),
 				fetchAllUserLogs(diffDays, 1500, start, end).catch(() => []),
+				fetchLocationHistory(start, end).catch(() => []),
 			]);
 			setDevices(devs || []);
 			setUsers(usrs || []);
 			setUserLogs(logs || []);
+			setLocationHistory(locHist || []);
 			setError(null);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Failed to load reports data.');
@@ -468,6 +667,52 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 	const safePage = Math.min(currentPage, totalPages);
 	const paginated = activeList.slice((safePage - 1) * pageSize, safePage * pageSize);
 
+	// Summary details for the active report (User name, emp code, mail address, device type, model, ip, location / date-wise location)
+	const summaryItems = useMemo(() => {
+		const deviceById = new Map();
+		for (const d of devices) {
+			if (d.deviceId) deviceById.set(d.deviceId, d);
+		}
+		if (activeCard === 'user-logs') {
+			const seen = new Map();
+			for (const ev of filteredUserLogs) {
+				const dev = ev.deviceId ? deviceById.get(ev.deviceId) : null;
+				const key = ev.deviceId || ev.userEmail || ev.userName || ev.osUsername || 'unknown';
+				if (seen.has(key)) continue;
+				const fallbackLoc = dev?.locationLabel || [dev?.city, dev?.region, dev?.country].filter(Boolean).join(', ') || '—';
+				seen.set(key, {
+					key,
+					userName: ev.userName || dev?.userName || ev.osUsername || '—',
+					empCode: ev.empCode || dev?.empCode || '—',
+					mailAddress: ev.userEmail || (dev?.user && dev.user.includes('@') ? dev.user : '—'),
+					deviceName: ev.deviceName || dev?.name || '—',
+					deviceType: getDeviceTypeLabel(dev),
+					model: dev?.model || '—',
+					ipAddress: dev?.ip || '—',
+					locationInfo: buildLocationSummary(ev.deviceId, fallbackLoc, startDate, endDate, locationHistory),
+				});
+			}
+			return Array.from(seen.values());
+		}
+		if (activeCard === 'device-report') {
+			return filteredDevices.map((dev) => {
+				const fallbackLoc = dev.locationLabel || [dev.city, dev.region, dev.country].filter(Boolean).join(', ') || '—';
+				return {
+					key: dev.deviceId || dev.id,
+					userName: dev.userName || dev.user || '—',
+					empCode: dev.empCode || '—',
+					mailAddress: dev.user && dev.user.includes('@') ? dev.user : '—',
+					deviceName: dev.name || '—',
+					deviceType: getDeviceTypeLabel(dev),
+					model: dev.model || '—',
+					ipAddress: dev.ip || '—',
+					locationInfo: buildLocationSummary(dev.deviceId, fallbackLoc, startDate, endDate, locationHistory),
+				};
+			});
+		}
+		return [];
+	}, [activeCard, filteredUserLogs, filteredDevices, devices, startDate, endDate, locationHistory]);
+
 	const handleExportUserLogs = async () => {
 		if (exportingKind) return;
 		setExportingKind('user-logs');
@@ -490,7 +735,10 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 			const fileStartDate = formatDDMMYYYY(startDate);
 			const fileEndDate = formatDDMMYYYY(endDate);
 			const fileName = `User_Logs_Report_${fileStartDate}_to_${fileEndDate}.xlsx`;
-			exportStyledSheet('User Logs Report', fileName, headers, rows, [0, 2, 6]);
+			exportStyledSheet('User Logs Report', fileName, headers, rows, [0, 2, 6], {
+				title: `USER ACTIVITY & SESSION LOGS REPORT (${fileStartDate} to ${fileEndDate})`,
+				items: summaryItems,
+			});
 			notify(`Exported ${rows.length} user log entries (${fileStartDate} to ${fileEndDate}) to Excel.`);
 		} catch {
 			notify('Failed to export user logs.');
@@ -523,7 +771,10 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 			const fileStartDate = formatDDMMYYYY(startDate);
 			const fileEndDate = formatDDMMYYYY(endDate);
 			const fileName = `Device_Report_${fileStartDate}_to_${fileEndDate}.xlsx`;
-			exportStyledSheet('Device Report', fileName, headers, rows, [0, 3, 9, 10]);
+			exportStyledSheet('Device Report', fileName, headers, rows, [0, 3, 9, 10], {
+				title: `FLEET DEVICE COMPLIANCE & STATUS REPORT (${fileStartDate} to ${fileEndDate})`,
+				items: summaryItems,
+			});
 			notify(`Exported ${rows.length} device report rows (${fileStartDate} to ${fileEndDate}) to Excel.`);
 		} catch {
 			notify('Failed to export device report.');
@@ -650,7 +901,7 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 								title={`Download ${activeCard === 'user-logs' ? 'user logs' : 'device report'} for ${formatDDMMYYYY(startDate)} to ${formatDDMMYYYY(endDate)}`}
 							>
 								{exportingKind ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-								<span>Export ({formatDDMMYYYY(startDate)} to {formatDDMMYYYY(endDate)})</span>
+								<span>Export</span>
 							</button>
 						</div>
 					</div>
@@ -680,13 +931,10 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 									className="px-3.5 py-2 bg-slate-100/90 hover:bg-slate-200/80 text-primary font-bold text-xs border border-outline-variant/40 rounded-xl transition-all cursor-pointer flex items-center gap-2.5 shadow-xs group"
 									title="Filter by date range"
 								>
-									<div className="w-6 h-6 rounded-lg bg-accent/15 text-accent flex items-center justify-center group-hover:scale-105 transition-transform shrink-0">
-										<Calendar size={13} />
+									<div className="w-4 h-4 rounded-lg bg-accent/15 text-accent flex items-center justify-center group-hover:scale-105 transition-transform shrink-0">
+										<Calendar size={11} />
 									</div>
 									<div className="flex flex-col text-left">
-										<span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider leading-none">
-											{DATE_PRESETS.find((p) => p.id === datePreset)?.label || 'Date Range'}
-										</span>
 										<span className="text-xs font-extrabold text-primary leading-tight mt-0.5">
 											{formatDDMMYYYY(startDate)} to {formatDDMMYYYY(endDate)}
 										</span>
@@ -700,7 +948,7 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 								</button>
 
 								{isDateDropdownOpen && (
-									<div className="absolute right-0 top-full mt-2 w-84 bg-background/95 backdrop-blur-2xl border border-border/90 rounded-3xl p-4 shadow-2xl z-[99999] space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
+									<div className="absolute right-0 top-full mt-2 w-96 bg-background/95 backdrop-blur-2xl border border-border/90 rounded-3xl p-4 shadow-2xl z-[99999] space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
 										{/* Quick Preset Chips */}
 										<div className="flex flex-wrap gap-1 border-b border-border/60 pb-3">
 											{DATE_PRESETS.filter((p) => p.id !== 'custom').map((p) => (
@@ -933,6 +1181,132 @@ export default function ReportsPage({ onNavigateTab, onNavigateToDevice }) {
 						</div>
 					</div>
 				</div>
+
+				{/* Summary Details Banner Above Table Column Headers */}
+				{!loading && summaryItems.length > 0 && (
+					<div className="px-6 py-4 bg-slate-50/90 border-b border-border/60 space-y-3">
+						<div className="flex items-center justify-between gap-2">
+							<span className="text-[11px] font-extrabold uppercase tracking-wider text-primary flex items-center gap-1.5">
+								<FileText size={13} className="text-accent" /> Summary Details
+								<span className="text-[10px] font-semibold text-muted-foreground normal-case">
+									({formatDDMMYYYY(startDate)} to {formatDDMMYYYY(endDate)})
+								</span>
+							</span>
+							{summaryItems.length > 1 && (
+								<span className="text-[11px] font-bold text-muted-foreground">
+									{summaryItems.length} user(s) / device(s)
+								</span>
+							)}
+						</div>
+
+						{summaryItems.length === 1 ? (
+							(() => {
+								const item = summaryItems[0];
+								return (
+									<div className="space-y-2.5">
+										<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 text-xs">
+											<div className="bg-background rounded-xl p-2.5 border border-border/60">
+												<span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">User Name</span>
+												<span className="font-bold text-primary mt-0.5 block truncate" title={item.userName}>{item.userName}</span>
+											</div>
+											<div className="bg-background rounded-xl p-2.5 border border-border/60">
+												<span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Emp Code</span>
+												<span className="font-bold text-primary mt-0.5 block truncate">{item.empCode}</span>
+											</div>
+											<div className="bg-background rounded-xl p-2.5 border border-border/60">
+												<span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Mail Address</span>
+												<span className="font-semibold text-primary mt-0.5 block truncate" title={item.mailAddress}>{item.mailAddress}</span>
+											</div>
+											<div className="bg-background rounded-xl p-2.5 border border-border/60">
+												<span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Device Type</span>
+												<span className="font-bold text-primary mt-0.5 flex items-center gap-1.5">
+													{item.deviceType === 'Laptop' ? <Laptop size={12} className="text-accent shrink-0" /> : <Monitor size={12} className="text-accent shrink-0" />}
+													{item.deviceType}
+												</span>
+											</div>
+											<div className="bg-background rounded-xl p-2.5 border border-border/60">
+												<span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Model</span>
+												<span className="font-semibold text-primary mt-0.5 block truncate" title={item.model}>{item.model}</span>
+											</div>
+											<div className="bg-background rounded-xl p-2.5 border border-border/60">
+												<span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">IP Address</span>
+												<span className="font-mono font-semibold text-primary mt-0.5 block truncate">{item.ipAddress}</span>
+											</div>
+											<div className="bg-background rounded-xl p-2.5 border border-border/60">
+												<span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Location</span>
+												{item.locationInfo.varied ? (
+													<span className="font-bold text-amber-600 mt-0.5 flex items-center gap-1">
+														<MapPin size={12} className="shrink-0" /> Varied (Date-wise)
+													</span>
+												) : (
+													<span className="font-semibold text-primary mt-0.5 block truncate" title={item.locationInfo.text}>
+														{item.locationInfo.text}
+													</span>
+												)}
+											</div>
+										</div>
+
+										{item.locationInfo.varied && item.locationInfo.entries.length > 0 && (
+											<div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-3">
+												<div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-700 mb-1.5 flex items-center gap-1">
+													<MapPin size={11} /> Date-wise Location History
+												</div>
+												<div className="flex flex-wrap gap-2">
+													{item.locationInfo.entries.map((e) => (
+														<span key={e.date} className="px-2.5 py-1 rounded-lg bg-background border border-amber-500/25 text-[11px] font-semibold text-primary">
+															<span className="font-bold text-amber-700">{formatDDMMYYYY(e.date)}:</span> {e.locationLabel}
+														</span>
+													))}
+												</div>
+											</div>
+										)}
+									</div>
+								);
+							})()
+						) : (
+							<div className="max-h-40 overflow-y-auto rounded-xl border border-border/60 bg-background">
+								<table className="w-full text-left border-collapse text-[11px]">
+									<thead className="bg-slate-100/80 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground sticky top-0">
+										<tr>
+											<th className="px-3 py-2">User Name</th>
+											<th className="px-3 py-2">Emp Code</th>
+											<th className="px-3 py-2">Mail Address</th>
+											<th className="px-3 py-2">Device Type</th>
+											<th className="px-3 py-2">Model</th>
+											<th className="px-3 py-2">IP Address</th>
+											<th className="px-3 py-2">Location</th>
+										</tr>
+									</thead>
+									<tbody className="divide-y divide-border/40">
+										{summaryItems.map((item) => (
+											<tr key={item.key} className="hover:bg-slate-50/70">
+												<td className="px-3 py-1.5 font-bold text-primary">{item.userName}</td>
+												<td className="px-3 py-1.5 text-muted-foreground">{item.empCode}</td>
+												<td className="px-3 py-1.5 text-muted-foreground">{item.mailAddress}</td>
+												<td className="px-3 py-1.5 font-semibold text-primary">{item.deviceType}</td>
+												<td className="px-3 py-1.5 text-muted-foreground">{item.model}</td>
+												<td className="px-3 py-1.5 font-mono text-primary">{item.ipAddress}</td>
+												<td className="px-3 py-1.5 text-primary">
+													{item.locationInfo.varied ? (
+														<div className="space-y-0.5">
+															{item.locationInfo.entries.map((e) => (
+																<div key={e.date} className="text-[10px]">
+																	<span className="font-bold text-amber-700">{formatDDMMYYYY(e.date)}:</span> {e.locationLabel}
+																</div>
+															))}
+														</div>
+													) : (
+														item.locationInfo.text
+													)}
+												</td>
+											</tr>
+										))}
+									</tbody>
+								</table>
+							</div>
+						)}
+					</div>
+				)}
 
 				<div className="overflow-x-auto min-h-[360px]">
 					{loading ? (
