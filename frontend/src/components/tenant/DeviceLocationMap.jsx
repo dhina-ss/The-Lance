@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Minus, Crosshair, MapPin } from 'lucide-react';
 
 const TILE_SIZE = 256;
-const SUBDOMAINS = ['a', 'b', 'c', 'd'];
+const SUBDOMAINS = ['a', 'b', 'c'];
 
 function clampLat(lat) {
 	return Math.max(-85.05112878, Math.min(85.05112878, lat));
@@ -25,7 +25,7 @@ function TileImage({ zoom, tx, wrappedTx, ty, left, top, onTileLoaded, onTileFai
 
 	const src =
 		fallbackStep === 0
-			? `https://${sub}.basemaps.cartocdn.com/rastertiles/voyager/${zoom}/${wrappedTx}/${ty}@2x.png`
+			? `https://${sub}.tile.openstreetmap.org/${zoom}/${wrappedTx}/${ty}.png`
 			: fallbackStep === 1
 			? `https://tile.openstreetmap.org/${zoom}/${wrappedTx}/${ty}.png`
 			: null;
@@ -279,7 +279,7 @@ export default function DeviceLocationMap({ latitude, longitude, label, accuracy
 
 			{/* Subtle Attribution */}
 			<div className="absolute bottom-1.5 right-2 z-20 px-1.5 py-0.5 rounded bg-white/80 text-[9px] text-slate-600 pointer-events-none">
-				© OpenStreetMap · © CARTO
+				© OpenStreetMap contributors
 			</div>
 		</div>
 	);
